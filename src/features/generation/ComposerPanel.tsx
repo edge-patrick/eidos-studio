@@ -71,7 +71,11 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
   }
 
   function handlePromptKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+    if (
+      status.hasApiKey &&
+      event.key === "Enter" &&
+      (event.metaKey || event.ctrlKey)
+    ) {
       event.preventDefault();
       generate();
     }
@@ -274,7 +278,12 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
           className="primary-button generate-button"
           type="button"
           onClick={generate}
-          disabled={!studio.prompt.trim() || studio.busy}
+          disabled={!status.hasApiKey || !studio.prompt.trim() || studio.busy}
+          title={
+            status.hasApiKey
+              ? undefined
+              : "Connect OpenRouter before generating"
+          }
         >
           <span>Generate image</span>
           <ArrowIcon />

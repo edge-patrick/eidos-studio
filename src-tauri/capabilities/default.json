@@ -14,6 +14,9 @@
     "allow-discard-reference",
     "allow-start-generation",
     "allow-cancel-generation",
-    "allow-save-output"
+    "allow-save-output",
+    "allow-list-history",
+    "allow-restore-history-reference",
+    "allow-delete-history-attempt"
   ]
 }

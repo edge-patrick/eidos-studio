@@ -7,7 +7,7 @@
 
 # Eidos Studio
 
-Eidos Studio is a simple desktop app for generating images with AI using your `OpenRouter` credits. No accounts, sign-in, ads, tracking, or subscriptions. This is an early first version.
+Eidos Studio is a local-first desktop app for generating images with AI using your `OpenRouter` credits. No accounts, sign-in, ads, tracking, or subscriptions.
 
 <p align="center">
   <img src="./docs/assets/eidos-studio-interface.png" alt="Eidos Studio app interface" width="680">
@@ -41,9 +41,16 @@ image generation alone.
 - Generate an image from a text prompt
 - Use one local image as a reference
 - Choose an aspect ratio and 1K, 2K, or 4K resolution
-- Keep generation history and image files locally
+- Browse successful, failed, and cancelled generations in a local image library
+- Reuse prompts, settings, and reference images from earlier generations
+- Save generated images elsewhere or permanently delete them from local storage
+- Open the local library without connecting an API key
 
 Prompts and reference images stay in the local Eidos library, but they are sent to OpenRouter and the model provider when you generate an image.
+
+## What's new in 0.3.0
+
+Version 0.3.0 introduces the full local Library: paged generation history, fast image thumbnails, detailed inspection, full-size previews, prompt reuse, and permanent deletion of locally managed images. The Library remains available offline without an OpenRouter key.
 
 ## Roadmap
 
@@ -52,7 +59,7 @@ Prompts and reference images stay in the local Eidos library, but they are sent 
 - [x] Local generation history
 - [x] Aspect ratio and resolution controls
 - [x] Polished interface and refreshed branding
-- [ ] A full history and image library
+- [x] A full history and image library
 - [ ] Multiple reference images
 - [ ] More image models and settings
 - [ ] Side-by-side model comparison

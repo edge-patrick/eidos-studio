@@ -7,7 +7,9 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use tokio::sync::oneshot;
 
 use crate::error::AppError;
-use crate::models::AppResult;
+use crate::models::{
+    AppResult, GenerationSettings, HistoryAsset, HistoryAttempt, HistoryCursor, HistoryPage,
+};
 
 const MIGRATIONS: &[(&str, &str)] = &[
     (
@@ -99,6 +101,17 @@ const MIGRATIONS: &[(&str, &str)] = &[
           AND mime_type IN ('image/png', 'image/jpeg', 'image/webp');
     "#,
     ),
+    (
+        "004_history_thumbnails_and_pending_deletions",
+        r#"
+        ALTER TABLE assets ADD COLUMN thumbnail_path TEXT;
+
+        CREATE TABLE pending_file_deletions (
+            path TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL
+        );
+    "#,
+    ),
 ];
 
 pub struct Database {
@@ -151,6 +164,7 @@ pub struct NewAsset<'a> {
     pub content_hash: &'a str,
     pub role: &'a str,
     pub local_path: &'a Path,
+    pub thumbnail_path: Option<&'a Path>,
     pub mime_type: &'a str,
     pub width: u32,
     pub height: u32,
@@ -286,6 +300,252 @@ impl Database {
             .map_err(AppError::storage)
     }
 
+    pub fn list_history(
+        &self,
+        cursor: Option<&HistoryCursor>,
+        limit: usize,
+    ) -> AppResult<HistoryPage> {
+        let limit = limit.clamp(1, 100);
+        let total_count = self
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM generation_attempts WHERE status IN ('succeeded', 'failed', 'cancelled')",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(AppError::storage)?;
+        let total_count = usize::try_from(total_count).map_err(AppError::storage)?;
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT
+                    attempts.id,
+                    attempts.prompt,
+                    attempts.model_id,
+                    attempts.status,
+                    attempts.settings_json,
+                    attempts.created_at,
+                    attempts.completed_at,
+                    attempts.duration_ms,
+                    attempts.cost_usd,
+                    attempts.provider_name,
+                    attempts.error_kind,
+                    attempts.error_message,
+                    output.local_path,
+                    output.mime_type,
+                    output.width,
+                    output.height,
+                    output.thumbnail_path,
+                    output.content_hash,
+                    reference.local_path,
+                    reference.mime_type,
+                    reference.width,
+                    reference.height,
+                    reference.thumbnail_path,
+                    reference.content_hash
+                FROM generation_attempts attempts
+                LEFT JOIN attempt_assets output_link
+                    ON output_link.generation_id = attempts.id
+                    AND output_link.role = 'output'
+                    AND output_link.sort_order = 0
+                LEFT JOIN assets output ON output.id = output_link.asset_id
+                LEFT JOIN attempt_assets reference_link
+                    ON reference_link.generation_id = attempts.id
+                    AND reference_link.role = 'reference'
+                    AND reference_link.sort_order = 0
+                LEFT JOIN assets reference ON reference.id = reference_link.asset_id
+                WHERE attempts.status IN ('succeeded', 'failed', 'cancelled')
+                  AND (
+                    ?1 IS NULL
+                    OR attempts.created_at < ?1
+                    OR (attempts.created_at = ?1 AND attempts.id < ?2)
+                  )
+                ORDER BY attempts.created_at DESC, attempts.id DESC
+                LIMIT ?3",
+            )
+            .map_err(AppError::storage)?;
+
+        let cursor_created_at = cursor.map(|value| value.created_at.as_str());
+        let cursor_id = cursor.map(|value| value.id.as_str());
+        let mut attempts = statement
+            .query_map(
+                params![cursor_created_at, cursor_id, (limit + 1) as i64],
+                |row| {
+                    let settings_json = row.get::<_, String>(4)?;
+                    Ok(HistoryAttempt {
+                        id: row.get(0)?,
+                        prompt: row.get(1)?,
+                        model_id: row.get(2)?,
+                        status: row.get(3)?,
+                        settings: serde_json::from_str::<GenerationSettings>(&settings_json)
+                            .unwrap_or_default(),
+                        created_at: row.get(5)?,
+                        completed_at: row.get(6)?,
+                        duration_ms: row.get(7)?,
+                        cost_usd: row.get(8)?,
+                        provider_name: row.get(9)?,
+                        error_kind: row.get(10)?,
+                        error_message: row.get(11)?,
+                        output: history_asset_from_row(row, 12)?,
+                        reference: history_asset_from_row(row, 18)?,
+                    })
+                },
+            )
+            .map_err(AppError::storage)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(AppError::storage)?;
+
+        let has_more = attempts.len() > limit;
+        if has_more {
+            attempts.pop();
+        }
+        let next_cursor = has_more.then(|| {
+            let last = attempts
+                .last()
+                .expect("a paged history result has a final item");
+            HistoryCursor {
+                created_at: last.created_at.clone(),
+                id: last.id.clone(),
+            }
+        });
+
+        Ok(HistoryPage {
+            attempts,
+            next_cursor,
+            total_count,
+        })
+    }
+
+    pub fn reference_for_attempt(&self, id: &str) -> AppResult<Option<HistoryAsset>> {
+        self.connection
+            .query_row(
+                "SELECT assets.local_path, assets.mime_type, assets.width, assets.height,
+                        assets.thumbnail_path, assets.content_hash
+                 FROM attempt_assets
+                 JOIN assets ON assets.id = attempt_assets.asset_id
+                 WHERE attempt_assets.generation_id = ?1
+                   AND attempt_assets.role = 'reference'
+                 ORDER BY attempt_assets.sort_order
+                 LIMIT 1",
+                [id],
+                |row| {
+                    Ok(HistoryAsset {
+                        asset_path: row.get(0)?,
+                        mime_type: row.get(1)?,
+                        width: row.get(2)?,
+                        height: row.get(3)?,
+                        thumbnail_path: row.get(4)?,
+                        content_hash: row.get(5)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(AppError::storage)
+    }
+
+    pub fn delete_history_attempt(&mut self, id: &str) -> AppResult<(bool, Vec<PathBuf>)> {
+        let transaction = self.connection.transaction().map_err(AppError::storage)?;
+        let linked_assets = {
+            let mut statement = transaction
+                .prepare(
+                    "SELECT DISTINCT assets.id, assets.local_path, assets.thumbnail_path
+                     FROM attempt_assets
+                     JOIN assets ON assets.id = attempt_assets.asset_id
+                     WHERE attempt_assets.generation_id = ?1",
+                )
+                .map_err(AppError::storage)?;
+            statement
+                .query_map([id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                })
+                .map_err(AppError::storage)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(AppError::storage)?
+        };
+
+        let deleted = transaction
+            .execute(
+                "DELETE FROM generation_attempts
+                 WHERE id = ?1 AND status IN ('succeeded', 'failed', 'cancelled')",
+                [id],
+            )
+            .map_err(AppError::storage)?
+            == 1;
+
+        let mut unreferenced_paths = Vec::new();
+        if deleted {
+            for (asset_id, local_path, thumbnail_path) in linked_assets {
+                let still_linked = transaction
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM attempt_assets WHERE asset_id = ?1)",
+                        [&asset_id],
+                        |row| row.get::<_, bool>(0),
+                    )
+                    .map_err(AppError::storage)?;
+                if !still_linked {
+                    transaction
+                        .execute("DELETE FROM assets WHERE id = ?1", [&asset_id])
+                        .map_err(AppError::storage)?;
+                    let paths = std::iter::once(local_path).chain(thumbnail_path);
+                    for path in paths {
+                        transaction
+                            .execute(
+                                "INSERT OR IGNORE INTO pending_file_deletions(path, created_at) VALUES (?1, ?2)",
+                                params![&path, Utc::now().to_rfc3339()],
+                            )
+                            .map_err(AppError::storage)?;
+                        unreferenced_paths.push(PathBuf::from(path));
+                    }
+                }
+            }
+        }
+
+        transaction.commit().map_err(AppError::storage)?;
+        Ok((deleted, unreferenced_paths))
+    }
+
+    pub fn pending_file_deletions(&self) -> AppResult<Vec<PathBuf>> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT path FROM pending_file_deletions ORDER BY created_at")
+            .map_err(AppError::storage)?;
+        statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(AppError::storage)?
+            .map(|path| path.map(PathBuf::from))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(AppError::storage)
+    }
+
+    pub fn clear_pending_file_deletions(&mut self, paths: &[PathBuf]) -> AppResult<()> {
+        let transaction = self.connection.transaction().map_err(AppError::storage)?;
+        for path in paths {
+            transaction
+                .execute(
+                    "DELETE FROM pending_file_deletions WHERE path = ?1",
+                    [path.to_string_lossy()],
+                )
+                .map_err(AppError::storage)?;
+        }
+        transaction.commit().map_err(AppError::storage)
+    }
+
+    pub fn set_asset_thumbnail(&self, content_hash: &str, path: &Path) -> AppResult<bool> {
+        self.connection
+            .execute(
+                "UPDATE assets
+                 SET thumbnail_path = COALESCE(thumbnail_path, ?2)
+                 WHERE content_hash = ?1",
+                params![content_hash, path.to_string_lossy()],
+            )
+            .map(|updated| updated == 1)
+            .map_err(AppError::storage)
+    }
+
     pub fn asset_hashes(&self) -> AppResult<HashSet<String>> {
         let mut statement = self
             .connection
@@ -300,6 +560,25 @@ impl Database {
     }
 }
 
+fn history_asset_from_row(
+    row: &rusqlite::Row<'_>,
+    start_index: usize,
+) -> rusqlite::Result<Option<HistoryAsset>> {
+    let local_path = row.get::<_, Option<String>>(start_index)?;
+    local_path
+        .map(|asset_path| {
+            Ok(HistoryAsset {
+                asset_path,
+                mime_type: row.get(start_index + 1)?,
+                width: row.get(start_index + 2)?,
+                height: row.get(start_index + 3)?,
+                thumbnail_path: row.get(start_index + 4)?,
+                content_hash: row.get(start_index + 5)?,
+            })
+        })
+        .transpose()
+}
+
 fn upsert_and_link_asset(
     transaction: &Transaction<'_>,
     generation_id: &str,
@@ -307,11 +586,15 @@ fn upsert_and_link_asset(
 ) -> AppResult<()> {
     transaction
         .execute(
-            "INSERT INTO assets(id, content_hash, local_path, mime_type, width, height, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT(content_hash) DO NOTHING",
+            "INSERT INTO assets(id, content_hash, local_path, thumbnail_path, mime_type, width, height, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(content_hash) DO UPDATE SET
+                thumbnail_path = COALESCE(assets.thumbnail_path, excluded.thumbnail_path)",
             params![
                 asset.id,
                 asset.content_hash,
                 asset.local_path.to_string_lossy(),
+                asset.thumbnail_path.map(|path| path.to_string_lossy()),
                 asset.mime_type,
                 asset.width,
                 asset.height,
@@ -373,6 +656,7 @@ mod tests {
                     content_hash: "hash-1",
                     role: "output",
                     local_path: output_path,
+                    thumbnail_path: None,
                     mime_type: "image/png",
                     width: 100,
                     height: 100,
@@ -442,6 +726,7 @@ mod tests {
                     content_hash: "hash-1",
                     role: "output",
                     local_path: Path::new("/tmp/should-not-be-linked.png"),
+                    thumbnail_path: None,
                     mime_type: "image/png",
                     width: 1,
                     height: 1,
@@ -520,5 +805,214 @@ mod tests {
             .await
             .expect("worker recovery");
         assert_eq!(recovered, 1);
+    }
+
+    #[test]
+    fn history_includes_all_terminal_attempts() {
+        let mut database = Database::open(Path::new(":memory:")).expect("database");
+        database
+            .start_attempt("success", "A finished prompt", "test/model", 0, "{}", None)
+            .expect("successful attempt");
+        database
+            .complete_attempt(
+                "success",
+                100,
+                Some(0.01),
+                Some("Test provider"),
+                NewAsset {
+                    id: "output",
+                    content_hash: "output-hash",
+                    role: "output",
+                    local_path: Path::new("objects/output.png"),
+                    thumbnail_path: None,
+                    mime_type: "image/png",
+                    width: 100,
+                    height: 80,
+                    sort_order: 0,
+                },
+            )
+            .expect("complete attempt");
+        database
+            .start_attempt("failure", "A failed prompt", "test/model", 0, "{}", None)
+            .expect("failed attempt");
+        database
+            .mark_failed(
+                "failure",
+                50,
+                &AppError::new(
+                    crate::error::ErrorKind::ProviderUnavailable,
+                    "Provider rejected the prompt.",
+                    false,
+                ),
+            )
+            .expect("record failure");
+        database
+            .start_attempt(
+                "cancelled",
+                "A cancelled prompt",
+                "test/model",
+                0,
+                "{}",
+                None,
+            )
+            .expect("cancelled attempt");
+        database
+            .mark_cancelled("cancelled", 10)
+            .expect("record cancellation");
+
+        let history = database.list_history(None, 60).expect("history");
+        assert_eq!(history.attempts.len(), 3);
+        assert_eq!(history.total_count, 3);
+        assert!(history.attempts.iter().any(|attempt| {
+            attempt.id == "success" && attempt.status == "succeeded" && attempt.output.is_some()
+        }));
+        assert!(history.attempts.iter().any(|attempt| {
+            attempt.id == "failure"
+                && attempt.status == "failed"
+                && attempt.error_message.as_deref() == Some("Provider rejected the prompt.")
+        }));
+        assert!(
+            history
+                .attempts
+                .iter()
+                .any(|attempt| { attempt.id == "cancelled" && attempt.status == "cancelled" })
+        );
+    }
+
+    #[test]
+    fn history_pages_with_a_stable_cursor() {
+        let mut database = Database::open(Path::new(":memory:")).expect("database");
+        for id in ["oldest", "middle", "newest"] {
+            database
+                .start_attempt(id, "Prompt", "test/model", 0, "{}", None)
+                .expect("attempt");
+            database
+                .mark_failed(id, 10, &AppError::internal("failed"))
+                .expect("terminal attempt");
+        }
+        for (id, created_at) in [
+            ("oldest", "2026-08-14T12:00:00Z"),
+            ("middle", "2026-08-15T12:00:00Z"),
+            ("newest", "2026-08-16T12:00:00Z"),
+        ] {
+            database
+                .connection
+                .execute(
+                    "UPDATE generation_attempts SET created_at = ?2 WHERE id = ?1",
+                    params![id, created_at],
+                )
+                .expect("set deterministic creation time");
+        }
+
+        let first = database.list_history(None, 2).expect("first page");
+        assert_eq!(first.total_count, 3);
+        assert_eq!(
+            first
+                .attempts
+                .iter()
+                .map(|attempt| attempt.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["newest", "middle"]
+        );
+        let cursor = first.next_cursor.expect("another page");
+
+        let second = database
+            .list_history(Some(&cursor), 2)
+            .expect("second page");
+        assert_eq!(
+            second
+                .attempts
+                .iter()
+                .map(|attempt| attempt.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["oldest"]
+        );
+        assert!(second.next_cursor.is_none());
+    }
+
+    #[test]
+    fn deletion_removes_cancelled_attempts() {
+        let mut database = Database::open(Path::new(":memory:")).expect("database");
+        database
+            .start_attempt("cancelled", "Prompt", "test/model", 0, "{}", None)
+            .expect("attempt");
+        database
+            .mark_cancelled("cancelled", 10)
+            .expect("record cancellation");
+
+        let (deleted, paths) = database
+            .delete_history_attempt("cancelled")
+            .expect("delete cancelled attempt");
+
+        assert!(deleted);
+        assert!(paths.is_empty());
+        assert!(
+            database
+                .list_history(None, 60)
+                .expect("history")
+                .attempts
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn deletion_keeps_assets_linked_to_another_attempt() {
+        let mut database = Database::open(Path::new(":memory:")).expect("database");
+        for (attempt_id, asset_id) in [("first", "asset-one"), ("second", "asset-two")] {
+            database
+                .start_attempt(attempt_id, "Prompt", "test/model", 0, "{}", None)
+                .expect("attempt");
+            database
+                .complete_attempt(
+                    attempt_id,
+                    100,
+                    None,
+                    None,
+                    NewAsset {
+                        id: asset_id,
+                        content_hash: "shared-hash",
+                        role: "output",
+                        local_path: Path::new("objects/shared.png"),
+                        thumbnail_path: Some(Path::new("thumbnails/shared.png")),
+                        mime_type: "image/png",
+                        width: 10,
+                        height: 10,
+                        sort_order: 0,
+                    },
+                )
+                .expect("complete attempt");
+        }
+
+        let (deleted, paths) = database
+            .delete_history_attempt("first")
+            .expect("delete first attempt");
+        assert!(deleted);
+        assert!(paths.is_empty());
+        assert!(database.output_for_attempt("second").unwrap().is_some());
+
+        let (deleted, paths) = database
+            .delete_history_attempt("second")
+            .expect("delete second attempt");
+        assert!(deleted);
+        assert_eq!(
+            paths,
+            vec![
+                PathBuf::from("objects/shared.png"),
+                PathBuf::from("thumbnails/shared.png"),
+            ]
+        );
+        assert_eq!(
+            database.pending_file_deletions().expect("pending paths"),
+            paths
+        );
+        database
+            .clear_pending_file_deletions(&paths)
+            .expect("clear completed paths");
+        assert!(
+            database
+                .pending_file_deletions()
+                .expect("cleared pending paths")
+                .is_empty()
+        );
     }
 }

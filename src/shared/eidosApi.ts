@@ -5,12 +5,15 @@ import type {
   AppStatus,
   GenerateRequest,
   GenerationJobEvent,
+  HistoryCursor,
+  HistoryPage,
   JobAccepted,
   ReferenceSelection,
   SaveResult,
 } from "./types";
 
 const GENERATION_JOB_EVENT = "generation-job-updated";
+const HISTORY_THUMBNAILS_UPDATED_EVENT = "history-thumbnails-updated";
 
 export function normalizeError(error: unknown): AppError {
   if (typeof error === "object" && error !== null && "message" in error) {
@@ -57,11 +60,21 @@ export const eidosApi = {
     invoke<{ cancelled: boolean }>("cancel_generation", { requestId }),
   saveOutput: (attemptId: string) =>
     invoke<SaveResult | null>("save_output", { attemptId }),
+  listHistory: (cursor: HistoryCursor | null = null, limit = 60) =>
+    invoke<HistoryPage>("list_history", { cursor, limit }),
+  restoreHistoryReference: (attemptId: string) =>
+    invoke<ReferenceSelection | null>("restore_history_reference", {
+      attemptId,
+    }),
+  deleteHistoryAttempt: (attemptId: string) =>
+    invoke<{ deleted: boolean }>("delete_history_attempt", { attemptId }),
   listenToGenerationJobs: (
     handler: (event: GenerationJobEvent) => void,
   ): Promise<UnlistenFn> =>
     listen<GenerationJobEvent>(GENERATION_JOB_EVENT, ({ payload }) =>
       handler(payload),
     ),
+  listenToHistoryThumbnails: (handler: () => void): Promise<UnlistenFn> =>
+    listen(HISTORY_THUMBNAILS_UPDATED_EVENT, handler),
   assetUrl: (path: string) => convertFileSrc(path),
 };

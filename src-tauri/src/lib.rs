@@ -29,9 +29,17 @@ pub fn run() {
             std::fs::create_dir_all(&app_data_dir)?;
 
             let assets = AssetStore::initialize(&app_data_dir.join("assets"))?;
-            let database = Database::open(&app_data_dir.join("eidos.sqlite3"))?;
+            let mut database = Database::open(&app_data_dir.join("eidos.sqlite3"))?;
             database.recover_interrupted_attempts()?;
-            assets.quarantine_unreferenced_objects(&database.asset_hashes()?)?;
+            let pending_deletions = database.pending_file_deletions()?;
+            let completed_deletions = assets.delete_pending_paths(&pending_deletions);
+            database.clear_pending_file_deletions(&completed_deletions)?;
+
+            let remaining_deletions = database.pending_file_deletions()?;
+            let mut retained_hashes = database.asset_hashes()?;
+            retained_hashes.extend(AssetStore::hashes_for_persisted_paths(&remaining_deletions));
+            assets.quarantine_unreferenced_objects(&retained_hashes)?;
+            assets.delete_unreferenced_thumbnails(&retained_hashes)?;
             let database = DatabaseHandle::start(database)?;
             let openrouter = OpenRouterClient::production()?;
 
@@ -54,6 +62,9 @@ pub fn run() {
             commands::start_generation,
             commands::cancel_generation,
             commands::save_output,
+            commands::list_history,
+            commands::restore_history_reference,
+            commands::delete_history_attempt,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Eidos Studio");

@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::db::NewAsset;
 use crate::error::{AppError, ErrorKind};
-use crate::images::inspect_raster;
+use crate::images::{create_history_thumbnail, inspect_raster};
 use crate::models::{
     AppResult, CancelResult, GenerateRequest, GenerationJobEvent, GenerationJobStatus,
     GenerationResult, GenerationSettings, IMAGE_MODEL_ID, JobAccepted, MAX_PROMPT_CHARS,
@@ -29,6 +29,7 @@ struct GenerationTask {
     prompt: String,
     settings: GenerationSettings,
     reference: Option<PreparedReference>,
+    api_key: String,
     _permit: OwnedSemaphorePermit,
 }
 
@@ -41,6 +42,9 @@ pub async fn start(
     let prompt = validate_prompt(&request.prompt)?;
     let settings = request.validated_settings()?;
     let settings_json = serde_json::to_string(&settings).map_err(AppError::internal)?;
+    // Credentials are required before an attempt becomes durable. Offline use
+    // of the local Library must never create authentication-failure history.
+    let api_key = crate::credentials::get_api_key()?;
     let permit = acquire_generation_slot(state.generation_slots.clone())?;
 
     let selected_reference = match request.reference_token.as_deref() {
@@ -106,6 +110,7 @@ pub async fn start(
                         content_hash: &content_hash,
                         role: "reference",
                         local_path: &storage_key,
+                        thumbnail_path: None,
                         mime_type: &database_mime_type,
                         width,
                         height,
@@ -146,6 +151,7 @@ pub async fn start(
         prompt,
         settings,
         reference: prepared_reference,
+        api_key,
         _permit: permit,
     };
     tauri::async_runtime::spawn(run(task, cancellation, app));
@@ -172,7 +178,7 @@ async fn run(task: GenerationTask, cancellation: CancellationToken, app: AppHand
     let duration_ms = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
 
     let event = match result {
-        Ok((image, stored)) => {
+        Ok((image, stored, thumbnail_storage_key)) => {
             let output_id = Uuid::new_v4().to_string();
             let database_request_id = task.request_id.clone();
             let content_hash = stored.content_hash.clone();
@@ -195,6 +201,7 @@ async fn run(task: GenerationTask, cancellation: CancellationToken, app: AppHand
                             content_hash: &content_hash,
                             role: "output",
                             local_path: &storage_key,
+                            thumbnail_path: thumbnail_storage_key.as_deref(),
                             mime_type: &mime_type,
                             width,
                             height,
@@ -255,12 +262,12 @@ async fn generate_and_store(
 ) -> AppResult<(
     crate::models::GeneratedImage,
     crate::asset_store::StoredAsset,
+    Option<std::path::PathBuf>,
 )> {
     if cancellation.is_cancelled() {
         return Err(cancelled_error());
     }
 
-    let api_key = crate::credentials::get_api_key()?;
     let reference = task
         .reference
         .as_ref()
@@ -268,7 +275,7 @@ async fn generate_and_store(
     let image = state
         .openrouter
         .generate_image(
-            &api_key,
+            &task.api_key,
             &task.prompt,
             &task.settings,
             reference,
@@ -277,7 +284,15 @@ async fn generate_and_store(
         .await?;
 
     let stored = state.assets.store(&image.extension, &image.bytes).await?;
-    Ok((image, stored))
+    let thumbnail_storage_key = match create_history_thumbnail(&image.bytes) {
+        Ok(bytes) => state
+            .assets
+            .store_thumbnail(&stored.content_hash, &bytes)
+            .await
+            .ok(),
+        Err(_) => None,
+    };
+    Ok((image, stored, thumbnail_storage_key))
 }
 
 async fn failed_event(

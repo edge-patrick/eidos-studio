@@ -1,15 +1,21 @@
-use tauri::{AppHandle, State};
+use std::path::PathBuf;
+
+use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
 use crate::error::{AppError, ErrorKind};
 use crate::generation;
-use crate::images::inspect_raster;
+use crate::images::{create_history_thumbnail, inspect_raster};
 use crate::models::{
-    AppResult, AppStatus, CancelResult, GenerateRequest, IMAGE_MODEL_ID, IMAGE_MODEL_NAME,
-    JobAccepted, MAX_REFERENCE_BYTES, ReferenceSelection, SUPPORTED_ASPECT_RATIOS,
-    SUPPORTED_RESOLUTIONS, SaveResult, SelectedReference,
+    AppResult, AppStatus, CancelResult, DeleteHistoryResult, GenerateRequest, HistoryCursor,
+    HistoryPage, IMAGE_MODEL_ID, IMAGE_MODEL_NAME, JobAccepted, MAX_REFERENCE_BYTES,
+    ReferenceSelection, SUPPORTED_ASPECT_RATIOS, SUPPORTED_RESOLUTIONS, SaveResult,
+    SelectedReference,
 };
 use crate::state::{AppState, locked};
+
+const DEFAULT_HISTORY_PAGE_SIZE: usize = 60;
+pub const HISTORY_THUMBNAILS_UPDATED_EVENT: &str = "history-thumbnails-updated";
 
 #[tauri::command]
 pub fn get_app_status() -> AppResult<AppStatus> {
@@ -185,4 +191,195 @@ pub async fn save_output(
     Ok(Some(SaveResult {
         path: destination.to_string_lossy().into_owned(),
     }))
+}
+
+#[tauri::command]
+pub async fn list_history(
+    cursor: Option<HistoryCursor>,
+    limit: Option<usize>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<HistoryPage> {
+    let page_limit = limit.unwrap_or(DEFAULT_HISTORY_PAGE_SIZE).clamp(1, 100);
+    let database_cursor = cursor;
+    let mut page = state
+        .database
+        .execute(move |database| database.list_history(database_cursor.as_ref(), page_limit))
+        .await?;
+
+    let mut thumbnail_backfills = Vec::new();
+    for attempt in &mut page.attempts {
+        if let Some(output) = &attempt.output
+            && output.thumbnail_path.is_none()
+        {
+            thumbnail_backfills.push((
+                output.content_hash.clone(),
+                PathBuf::from(&output.asset_path),
+            ));
+        }
+        for asset in [&mut attempt.output, &mut attempt.reference]
+            .into_iter()
+            .flatten()
+        {
+            let persisted_path = std::path::Path::new(&asset.asset_path);
+            asset.asset_path = state
+                .assets
+                .resolve_persisted_path(persisted_path)?
+                .to_string_lossy()
+                .into_owned();
+            if let Some(thumbnail_path) = &asset.thumbnail_path {
+                asset.thumbnail_path = Some(
+                    state
+                        .assets
+                        .resolve_persisted_path(std::path::Path::new(thumbnail_path))?
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+            }
+        }
+    }
+
+    if !thumbnail_backfills.is_empty() {
+        spawn_thumbnail_backfill(
+            thumbnail_backfills,
+            state.database.clone(),
+            state.assets.clone(),
+            app,
+        );
+    }
+
+    Ok(page)
+}
+
+#[tauri::command]
+pub async fn restore_history_reference(
+    attempt_id: String,
+    state: State<'_, AppState>,
+) -> AppResult<Option<ReferenceSelection>> {
+    let reference_attempt_id = attempt_id;
+    let reference = state
+        .database
+        .execute(move |database| database.reference_for_attempt(&reference_attempt_id))
+        .await?;
+    let Some(reference) = reference else {
+        return Ok(None);
+    };
+
+    let persisted_path = std::path::Path::new(&reference.asset_path);
+    let source_path = state.assets.resolve_persisted_path(persisted_path)?;
+    let metadata = tokio::fs::metadata(&source_path)
+        .await
+        .map_err(AppError::file)?;
+    if metadata.len() > MAX_REFERENCE_BYTES {
+        return Err(AppError::new(
+            ErrorKind::File,
+            "The saved reference is too large to reuse.",
+            false,
+        ));
+    }
+
+    let bytes = tokio::fs::read(&source_path)
+        .await
+        .map_err(AppError::file)?;
+    let (mime_type, extension, width, height) = inspect_raster(&bytes)?;
+    if mime_type != reference.mime_type || width != reference.width || height != reference.height {
+        return Err(AppError::new(
+            ErrorKind::File,
+            "The saved reference image changed unexpectedly.",
+            false,
+        ));
+    }
+
+    let token = Uuid::new_v4().to_string();
+    let managed_path = state
+        .assets
+        .stage_selection(&token, extension, &bytes)
+        .await?;
+    let selected = SelectedReference {
+        path: managed_path.clone(),
+        mime_type: mime_type.to_owned(),
+        extension: extension.to_owned(),
+        width,
+        height,
+    };
+    if let Err(error) = locked(&state.references, "reference").map(|mut references| {
+        references.insert(token.clone(), selected);
+    }) {
+        let _ = state.assets.discard_selection(&managed_path).await;
+        return Err(error);
+    }
+
+    Ok(Some(ReferenceSelection {
+        token,
+        file_name: "Saved reference".to_owned(),
+        mime_type: mime_type.to_owned(),
+        width,
+        height,
+        asset_path: managed_path.to_string_lossy().into_owned(),
+    }))
+}
+
+#[tauri::command]
+pub async fn delete_history_attempt(
+    attempt_id: String,
+    state: State<'_, AppState>,
+) -> AppResult<DeleteHistoryResult> {
+    let (deleted, unreferenced_paths) = state
+        .database
+        .execute(move |database| database.delete_history_attempt(&attempt_id))
+        .await?;
+    let completed_paths = state.assets.delete_pending_paths(&unreferenced_paths);
+    if !completed_paths.is_empty()
+        && let Err(error) = state
+            .database
+            .execute(move |database| database.clear_pending_file_deletions(&completed_paths))
+            .await
+    {
+        eprintln!("could not clear completed history file deletions: {error:?}");
+    }
+    Ok(DeleteHistoryResult { deleted })
+}
+
+fn spawn_thumbnail_backfill(
+    jobs: Vec<(String, PathBuf)>,
+    database: crate::db::DatabaseHandle,
+    assets: crate::asset_store::AssetStore,
+    app: AppHandle,
+) {
+    tauri::async_runtime::spawn(async move {
+        let mut updated = false;
+        for (content_hash, stored_path) in jobs {
+            let Ok(source) = assets.resolve_persisted_path(&stored_path) else {
+                continue;
+            };
+            let Ok(bytes) = tokio::fs::read(source).await else {
+                continue;
+            };
+            let Ok(thumbnail_bytes) = create_history_thumbnail(&bytes) else {
+                continue;
+            };
+            let Ok(thumbnail_path) = assets
+                .store_thumbnail(&content_hash, &thumbnail_bytes)
+                .await
+            else {
+                continue;
+            };
+            let database_hash = content_hash.clone();
+            let database_path = thumbnail_path.clone();
+            let asset_exists = database
+                .execute(move |database| {
+                    database.set_asset_thumbnail(&database_hash, &database_path)
+                })
+                .await
+                .unwrap_or(false);
+            if asset_exists {
+                updated = true;
+            } else {
+                let _ = assets.delete_persisted_path(&thumbnail_path);
+            }
+        }
+        if updated {
+            let _ = app.emit(HISTORY_THUMBNAILS_UPDATED_EVENT, ());
+        }
+    });
 }

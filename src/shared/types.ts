@@ -58,3 +58,44 @@ export interface JobAccepted {
 export interface SaveResult {
   path: string;
 }
+
+export interface GenerationSettings {
+  aspectRatio?: string;
+  resolution?: string;
+}
+
+export interface HistoryAsset {
+  assetPath: string;
+  thumbnailPath?: string;
+  mimeType: string;
+  width: number;
+  height: number;
+}
+
+export interface HistoryAttempt {
+  id: string;
+  prompt: string;
+  modelId: string;
+  status: "succeeded" | "failed" | "cancelled";
+  settings: GenerationSettings;
+  createdAt: string;
+  completedAt?: string;
+  durationMs?: number;
+  costUsd?: number;
+  providerName?: string;
+  errorKind?: string;
+  errorMessage?: string;
+  output?: HistoryAsset;
+  reference?: HistoryAsset;
+}
+
+export interface HistoryCursor {
+  createdAt: string;
+  id: string;
+}
+
+export interface HistoryPage {
+  attempts: HistoryAttempt[];
+  nextCursor?: HistoryCursor;
+  totalCount: number;
+}

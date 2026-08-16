@@ -73,6 +73,32 @@ export function ClockIcon() {
   );
 }
 
+export function CopyIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <rect x="7" y="7" width="9" height="9" rx="1.5" />
+      <path d="M13 7V5.5A1.5 1.5 0 0 0 11.5 4h-7A1.5 1.5 0 0 0 3 5.5v7A1.5 1.5 0 0 0 4.5 14H7" />
+    </svg>
+  );
+}
+
+export function WarningIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M9 3.7 2.8 14.4A1.1 1.1 0 0 0 3.8 16h12.4a1.1 1.1 0 0 0 1-1.6L11 3.7a1.1 1.1 0 0 0-2 0Z" />
+      <path d="M10 7v4M10 13.8v.2" />
+    </svg>
+  );
+}
+
+export function ExpandIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M8 3H3v5M12 3h5v5M8 17H3v-5M12 17h5v-5" />
+    </svg>
+  );
+}
+
 export function Spinner() {
   return <span className="spinner" aria-hidden="true" />;
 }

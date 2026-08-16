@@ -20,6 +20,7 @@ interface OnboardingScreenProps {
   onSubmit: (event: React.FormEvent) => void;
   onBack: () => void;
   onForget: () => void;
+  onOpenLibrary: () => void;
 }
 
 export function OnboardingScreen({
@@ -32,6 +33,7 @@ export function OnboardingScreen({
   onSubmit,
   onBack,
   onForget,
+  onOpenLibrary,
 }: OnboardingScreenProps) {
   return (
     <main className="onboarding-shell">
@@ -91,6 +93,18 @@ export function OnboardingScreen({
             <span>{connecting ? "Checking key" : "Connect OpenRouter"}</span>
             {connecting ? <Spinner /> : <ArrowIcon />}
           </button>
+
+          {!hasApiKey && (
+            <button
+              className="offline-entry-button"
+              type="button"
+              onClick={onOpenLibrary}
+              disabled={connecting}
+            >
+              <span aria-hidden="true" />
+              Open local library
+            </button>
+          )}
 
           <div className="credential-actions">
             {changingKey && hasApiKey && (

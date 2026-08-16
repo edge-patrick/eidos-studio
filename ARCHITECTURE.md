@@ -48,14 +48,14 @@ Cancellation is honored while waiting for the provider. Once the provider return
 - A successful attempt and its output link are committed in one SQLite transaction.
 - Files are written to a unique partial path and renamed into place before the database transaction.
 - At startup, stale `running` attempts become `failed` and session-only selections are cleared. Reconciliation compares content hashes rather than machine-specific paths.
-- Unreferenced objects are moved to `assets/orphaned` instead of deleted. Unknown files are left untouched, keeping startup recovery conservative.
+- During startup recovery, unreferenced objects are moved to `assets/orphaned` and unknown files are left untouched. User-requested deletions are queued in the same SQLite transaction as the history deletion, retried at startup, and remove originals plus thumbnails once no history items reference them.
 
 SQLite cannot share an atomic transaction with the filesystem. The write ordering and startup reconciliation are the deliberate consistency mechanism.
 
 ## Security boundary
 
 - The API key is stored in the operating-system credential store and is never returned to React or written to SQLite.
-- The main window receives an explicit allow-list of eight application commands plus event listen/unlisten; it does not receive Tauri's broad default capability set.
+- The main window receives an explicit allow-list of application commands plus event listen/unlisten; it does not receive Tauri's broad default capability set.
 - The asset protocol is restricted to `$APPDATA/assets/**`.
 - Reference files are validated as supported raster formats and copied into managed storage before use.
 - Provider response bodies and decoded images have independent size limits.
@@ -63,7 +63,7 @@ SQLite cannot share an atomic transaction with the filesystem. The write orderin
 
 ## Adding future features
 
-- History should query Rust/SQLite and return metadata plus managed paths; it should not preload image bytes.
+- History uses cursor-paged Rust/SQLite queries and returns metadata plus managed paths; it does not send image bytes across IPC. The grid uses 512 px managed thumbnails while the inspector and lightbox retain the original image.
 - Runtime model discovery belongs behind a provider/catalog service. Expose normalized model capabilities through an IPC command, then render controls from those capabilities.
 - Comparison should maintain `Record<requestId, GenerationState>` (or an equivalent store) and reuse the existing start/cancel/event protocol.
 - If the application gains deep links or independently navigable pages, add a router then. Screen extraction already keeps that change outside the feature logic.

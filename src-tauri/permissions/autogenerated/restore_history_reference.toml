@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-restore-history-reference"
+description = "Enables the restore_history_reference command without any pre-configured scope."
+commands.allow = ["restore_history_reference"]
+
+[[permission]]
+identifier = "deny-restore-history-reference"
+description = "Denies the restore_history_reference command without any pre-configured scope."
+commands.deny = ["restore_history_reference"]

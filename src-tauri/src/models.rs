@@ -40,13 +40,66 @@ pub struct GenerateRequest {
     pub resolution: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerationSettings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub aspect_ratio: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resolution: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryAsset {
+    pub asset_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_path: Option<String>,
+    pub mime_type: String,
+    pub width: u32,
+    pub height: u32,
+    #[serde(skip)]
+    pub content_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryAttempt {
+    pub id: String,
+    pub prompt: String,
+    pub model_id: String,
+    pub status: String,
+    pub settings: GenerationSettings,
+    pub created_at: String,
+    pub completed_at: Option<String>,
+    pub duration_ms: Option<i64>,
+    pub cost_usd: Option<f64>,
+    pub provider_name: Option<String>,
+    pub error_kind: Option<String>,
+    pub error_message: Option<String>,
+    pub output: Option<HistoryAsset>,
+    pub reference: Option<HistoryAsset>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryCursor {
+    pub created_at: String,
+    pub id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryPage {
+    pub attempts: Vec<HistoryAttempt>,
+    pub next_cursor: Option<HistoryCursor>,
+    pub total_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteHistoryResult {
+    pub deleted: bool,
 }
 
 impl GenerateRequest {

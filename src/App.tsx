@@ -1,8 +1,10 @@
 import { FormEvent, useEffect, useState } from "react";
 import "./App.css";
 import { LoadingScreen } from "./components/LoadingScreen";
+import { StudioHeader, type StudioView } from "./components/StudioHeader";
 import { WorkspaceScreen } from "./features/generation/WorkspaceScreen";
 import { useStudioController } from "./features/generation/useStudioController";
+import { LibraryScreen } from "./features/history/LibraryScreen";
 import { OnboardingScreen } from "./features/onboarding/OnboardingScreen";
 import { eidosApi, normalizeError } from "./shared/eidosApi";
 import type { AppError, AppStatus } from "./shared/types";
@@ -23,6 +25,7 @@ function App() {
   const [apiKey, setApiKey] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [changingKey, setChangingKey] = useState(false);
+  const [studioView, setStudioView] = useState<StudioView>("create");
   const [onboardingError, setOnboardingError] = useState<AppError | null>(null);
   const studio = useStudioController(status);
 
@@ -87,20 +90,43 @@ function App() {
         onSubmit={(event) => void connectKey(event)}
         onBack={() => setScreen("workspace")}
         onForget={() => void forgetKey()}
+        onOpenLibrary={() => {
+          setStudioView("library");
+          setScreen("workspace");
+        }}
       />
     );
   }
 
   return (
-    <WorkspaceScreen
-      status={status}
-      studio={studio}
-      onChangeKey={() => {
-        setChangingKey(true);
-        setOnboardingError(null);
-        setScreen("onboarding");
-      }}
-    />
+    <main className="studio-shell">
+      <StudioHeader
+        activeView={studioView}
+        generating={studio.busy}
+        connected={status.hasApiKey}
+        onViewChange={setStudioView}
+        onChangeKey={() => {
+          setChangingKey(status.hasApiKey);
+          setOnboardingError(null);
+          setScreen("onboarding");
+        }}
+      />
+      <div className="studio-view-content" hidden={studioView !== "create"}>
+        <WorkspaceScreen status={status} studio={studio} />
+      </div>
+      <div className="studio-view-content" hidden={studioView !== "library"}>
+        <LibraryScreen
+          active={studioView === "library"}
+          status={status}
+          generationBusy={studio.busy}
+          onDeleted={studio.handleHistoryAttemptDeleted}
+          onReuse={async (attempt) => {
+            await studio.loadHistoryAttempt(attempt);
+            setStudioView("create");
+          }}
+        />
+      </div>
+    </main>
   );
 }
 
