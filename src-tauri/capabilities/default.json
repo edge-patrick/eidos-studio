@@ -6,6 +6,7 @@
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
+    "core:window:allow-start-dragging",
     "allow-get-app-status",
     "allow-save-api-key",
     "allow-remove-api-key",

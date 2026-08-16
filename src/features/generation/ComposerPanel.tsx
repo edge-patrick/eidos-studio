@@ -1,22 +1,88 @@
-import type { KeyboardEvent } from "react";
-import { ArrowIcon, CloseIcon } from "../../components/Icons";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import nanoBananaLogo from "../../assets/nano-banana-logo.svg";
+import {
+  ArrowIcon,
+  ClockIcon,
+  CloseIcon,
+  PlusIcon,
+} from "../../components/Icons";
 import { eidosApi } from "../../shared/eidosApi";
+import type { AppStatus } from "../../shared/types";
 import type { StudioController } from "./useStudioController";
 
-export function ComposerPanel({ studio }: { studio: StudioController }) {
+interface ComposerPanelProps {
+  status: AppStatus;
+  studio: StudioController;
+}
+
+const upcomingModels = [
+  { name: "GPT Image", maker: "OpenAI", monogram: "G" },
+  { name: "FLUX", maker: "Black Forest Labs", monogram: "F" },
+  { name: "Ideogram", maker: "Ideogram", monogram: "I" },
+];
+
+export function ComposerPanel({ status, studio }: ComposerPanelProps) {
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const modelPickerRef = useRef<HTMLDetailsElement>(null);
+  const modelPickerSummaryRef = useRef<HTMLElement>(null);
+
+  function dismissModelPicker(restoreFocus = false) {
+    if (modelPickerRef.current) modelPickerRef.current.open = false;
+    setModelPickerOpen(false);
+    if (restoreFocus) modelPickerSummaryRef.current?.focus();
+  }
+
+  useEffect(() => {
+    function handlePointerDown(event: PointerEvent) {
+      const picker = modelPickerRef.current;
+      if (
+        picker?.open &&
+        event.target instanceof Node &&
+        !picker.contains(event.target)
+      ) {
+        picker.open = false;
+        setModelPickerOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key !== "Escape" || !modelPickerRef.current?.open) return;
+      event.preventDefault();
+      modelPickerRef.current.open = false;
+      setModelPickerOpen(false);
+      modelPickerSummaryRef.current?.focus();
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
+  function generate() {
+    dismissModelPicker();
+    void studio.generate();
+  }
+
+  function closeModelPicker() {
+    dismissModelPicker(true);
+  }
+
   function handlePromptKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
-      void studio.generate();
+      generate();
     }
   }
 
   return (
-    <section className="composer-panel" aria-label="Image direction">
+    <section className="composer-panel" aria-label="Image prompt">
       <div className="composer-section prompt-section">
         <div className="section-heading">
           <span>01</span>
-          <label htmlFor="prompt">Direction</label>
+          <label htmlFor="prompt">Prompt</label>
           {studio.prompt.length > 6500 && (
             <small>{studio.prompt.length} / 8000</small>
           )}
@@ -37,9 +103,91 @@ export function ComposerPanel({ studio }: { studio: StudioController }) {
         </p>
       </div>
 
-      <div className="composer-section reference-section">
+      <div className="composer-section model-section">
         <div className="section-heading">
           <span>02</span>
+          <span>Model</span>
+        </div>
+
+        <details
+          ref={modelPickerRef}
+          className={`model-picker${studio.busy ? " disabled" : ""}`}
+          onClick={(event) => {
+            if (studio.busy) event.preventDefault();
+          }}
+          onToggle={(event) => {
+            setModelPickerOpen(event.currentTarget.open);
+          }}
+        >
+          <summary
+            ref={modelPickerSummaryRef}
+            aria-haspopup="listbox"
+            aria-label="Select image model"
+            aria-expanded={modelPickerOpen}
+            aria-controls="image-model-options"
+          >
+            <span className="model-icon banana-icon">
+              <img src={nanoBananaLogo} alt="" draggable={false} />
+            </span>
+            <span className="model-copy">
+              <strong>{status.modelName}</strong>
+              <small>{status.modelId}</small>
+            </span>
+            <span className="model-chevron" aria-hidden="true" />
+          </summary>
+
+          <div
+            id="image-model-options"
+            className="model-menu"
+            role="listbox"
+            aria-label="Image model"
+          >
+            <button
+              className="model-option selected"
+              type="button"
+              role="option"
+              aria-selected="true"
+              onClick={closeModelPicker}
+            >
+              <span className="model-icon banana-icon">
+                <img src={nanoBananaLogo} alt="" draggable={false} />
+              </span>
+              <span className="model-copy">
+                <strong>{status.modelName}</strong>
+                <small>{status.modelId}</small>
+              </span>
+              <span className="model-check" aria-hidden="true">✓</span>
+            </button>
+
+            {upcomingModels.map((model) => (
+              <button
+                className="model-option"
+                key={model.name}
+                type="button"
+                role="option"
+                aria-selected="false"
+                disabled
+              >
+                <span className="model-icon model-monogram" aria-hidden="true">
+                  {model.monogram}
+                </span>
+                <span className="model-copy">
+                  <strong>{model.name}</strong>
+                  <small>{model.maker}</small>
+                </span>
+                <span className="coming-soon">
+                  <ClockIcon />
+                  Coming soon
+                </span>
+              </button>
+            ))}
+          </div>
+        </details>
+      </div>
+
+      <div className="composer-section reference-section">
+        <div className="section-heading">
+          <span>03</span>
           <span>Reference</span>
           <small>Optional</small>
         </div>
@@ -73,8 +221,10 @@ export function ComposerPanel({ studio }: { studio: StudioController }) {
             onClick={() => void studio.chooseReference()}
             disabled={studio.referenceBusy || studio.busy}
           >
-            <div className="reference-plus">+</div>
-            <div>
+            <span className="reference-plus" aria-hidden="true">
+              <PlusIcon />
+            </span>
+            <div className="reference-copy">
               <strong>
                 {studio.referenceBusy ? "Opening files…" : "Add an image"}
               </strong>
@@ -86,7 +236,7 @@ export function ComposerPanel({ studio }: { studio: StudioController }) {
 
       <div className="composer-section settings-section">
         <div className="section-heading">
-          <span>03</span>
+          <span>04</span>
           <span>Size</span>
         </div>
 
@@ -123,7 +273,7 @@ export function ComposerPanel({ studio }: { studio: StudioController }) {
         <button
           className="primary-button generate-button"
           type="button"
-          onClick={() => void studio.generate()}
+          onClick={generate}
           disabled={!studio.prompt.trim() || studio.busy}
         >
           <span>Generate image</span>

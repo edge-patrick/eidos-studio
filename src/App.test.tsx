@@ -62,6 +62,13 @@ describe("App", () => {
     expect(
       await screen.findByRole("heading", { name: "Bring your own key" }),
     ).toBeInTheDocument();
+    expect(screen.queryByText("Local image workspace")).not.toBeInTheDocument();
+    expect(screen.queryByText("01 / CONNECT")).not.toBeInTheDocument();
+    expect(screen.queryByText("EI")).not.toBeInTheDocument();
+    expect(screen.queryByText("01")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/sent to OpenRouter and the model provider/),
+    ).toBeInTheDocument();
   });
 
   it("opens the workspace when a key is already stored", async () => {
@@ -73,6 +80,53 @@ describe("App", () => {
       await screen.findByPlaceholderText("Describe the image you want to make…"),
     ).toBeInTheDocument();
     expect(screen.getByText("Your image appears here.")).toBeInTheDocument();
+  });
+
+  it("shows the active model and disabled upcoming models in the composer", async () => {
+    invokeMock.mockResolvedValueOnce(appStatus);
+
+    render(<App />);
+
+    await screen.findByPlaceholderText("Describe the image you want to make…");
+    fireEvent.click(screen.getByLabelText("Select image model"));
+
+    expect(
+      screen.getByRole("option", { name: /Nano Banana/ }),
+    ).toHaveAttribute("aria-selected", "true");
+    expect(
+      screen.getByRole("option", { name: /GPT Image.*Coming soon/ }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("option", { name: /FLUX.*Coming soon/ }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("option", { name: /Ideogram.*Coming soon/ }),
+    ).toBeDisabled();
+  });
+
+  it("dismisses the model picker outside and with Escape", async () => {
+    invokeMock.mockResolvedValueOnce(appStatus);
+
+    render(<App />);
+
+    const prompt = await screen.findByPlaceholderText(
+      "Describe the image you want to make…",
+    );
+    const pickerButton = screen.getByLabelText("Select image model");
+    const picker = pickerButton.closest("details");
+
+    fireEvent.click(pickerButton);
+    expect(picker).toHaveAttribute("open");
+
+    fireEvent.pointerDown(prompt);
+    expect(picker).not.toHaveAttribute("open");
+
+    fireEvent.click(pickerButton);
+    expect(picker).toHaveAttribute("open");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(picker).not.toHaveAttribute("open");
+    expect(pickerButton).toHaveFocus();
   });
 
   it("sends the selected numeric ratio and resolution", async () => {

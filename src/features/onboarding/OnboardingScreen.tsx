@@ -1,6 +1,13 @@
 import { BrandMark } from "../../components/BrandMark";
 import { ErrorMessage } from "../../components/ErrorMessage";
-import { ArrowIcon, KeyIcon, LockIcon, Spinner } from "../../components/Icons";
+import {
+  ArrowIcon,
+  BackIcon,
+  KeyIcon,
+  LockIcon,
+  Spinner,
+  TrashIcon,
+} from "../../components/Icons";
 import type { AppError } from "../../shared/types";
 
 interface OnboardingScreenProps {
@@ -28,33 +35,28 @@ export function OnboardingScreen({
 }: OnboardingScreenProps) {
   return (
     <main className="onboarding-shell">
+      <header className="onboarding-titlebar" data-tauri-drag-region>
+        <BrandMark />
+      </header>
       <section className="onboarding-manifesto" aria-labelledby="welcome-title">
-        <div className="manifesto-topline">
-          <BrandMark />
-          <span>Local image workspace</span>
-        </div>
         <div className="manifesto-copy">
-          <p className="eyebrow">One model. One clear surface.</p>
+          <p className="eyebrow">OpenRouter image generation, refined.</p>
           <h1 id="welcome-title">
-            Make the image.
+            A beautiful front end
             <br />
-            Keep the work.
+            for powerful models.
           </h1>
           <p>
-            Eidos keeps your working library on this Mac while Nano Banana
-            handles the generation through OpenRouter.
+            Eidos is a free desktop workspace for OpenRouter image generation.
+            No Eidos account or subscription—bring your API key, choose a
+            model, and start creating.
           </p>
-        </div>
-        <div className="manifesto-index" aria-hidden="true">
-          <span>EI</span>
-          <span>01</span>
         </div>
       </section>
 
       <section className="credential-panel">
         <form className="credential-form" onSubmit={onSubmit}>
           <div>
-            <p className="section-number">01 / CONNECT</p>
             <h2>{changingKey ? "Replace your key" : "Bring your own key"}</h2>
             <p className="form-intro">
               Eidos uses your OpenRouter balance directly. There is no Eidos
@@ -98,6 +100,7 @@ export function OnboardingScreen({
                 onClick={onBack}
                 disabled={connecting}
               >
+                <BackIcon />
                 Back to studio
               </button>
             )}
@@ -108,6 +111,7 @@ export function OnboardingScreen({
                 onClick={onForget}
                 disabled={connecting}
               >
+                <TrashIcon />
                 Forget stored key
               </button>
             )}
@@ -115,8 +119,8 @@ export function OnboardingScreen({
 
           <p className="privacy-note">
             <LockIcon />
-            Stored in macOS Keychain. Prompts and references are sent to
-            OpenRouter and Google only when you generate.
+            Stored in macOS Keychain. When you generate, prompts and references
+            are sent to OpenRouter and the model provider.
           </p>
         </form>
       </section>

@@ -1,3 +1,4 @@
+import eidosLogo from "../../assets/eidos-logo.svg";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ArrowIcon, DownloadIcon } from "../../components/Icons";
 import { eidosApi } from "../../shared/eidosApi";
@@ -8,11 +9,6 @@ export function ResultPanel({ studio }: { studio: StudioController }) {
 
   return (
     <section className="result-panel" aria-label="Generated image">
-      <div className="stage-index" aria-hidden="true">
-        <span>OUTPUT</span>
-        <span>01 / 01</span>
-      </div>
-
       {generation.status === "generating" ? (
         <DevelopingState onCancel={studio.cancelGeneration} />
       ) : generation.status === "ready" ? (
@@ -52,7 +48,7 @@ export function ResultPanel({ studio }: { studio: StudioController }) {
               type="button"
               onClick={studio.startNewGeneration}
             >
-              New direction
+              New prompt
             </button>
             <button
               className="stage-secondary-button"
@@ -93,7 +89,7 @@ export function ResultPanel({ studio }: { studio: StudioController }) {
               type="button"
               onClick={studio.startNewGeneration}
             >
-              Edit direction
+              Edit prompt
             </button>
           </div>
         </div>
@@ -107,10 +103,8 @@ export function ResultPanel({ studio }: { studio: StudioController }) {
 function DevelopingState({ onCancel }: { onCancel: () => Promise<void> }) {
   return (
     <div className="developing-state">
-      <div className="developing-orbit" aria-hidden="true">
-        <span />
-        <span />
-        <span />
+      <div className="developing-logo" aria-hidden="true">
+        <img src={eidosLogo} alt="" draggable={false} />
       </div>
       <p className="eyebrow">Nano Banana is working</p>
       <h2>Developing image</h2>
@@ -132,14 +126,12 @@ function DevelopingState({ onCancel }: { onCancel: () => Promise<void> }) {
 function EmptyState() {
   return (
     <div className="empty-stage">
-      <div className="aperture-mark" aria-hidden="true">
-        <span />
-        <span />
-        <span />
+      <div className="empty-logo-mark" aria-hidden="true">
+        <img src={eidosLogo} alt="" draggable={false} />
       </div>
       <p className="eyebrow">Ready for exposure</p>
       <h2>Your image appears here.</h2>
-      <p>Write a direction, add a reference if useful, then generate.</p>
+      <p>Write a prompt, add a reference if useful, then generate.</p>
     </div>
   );
 }
