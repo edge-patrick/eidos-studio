@@ -698,5 +698,6 @@ function formatDuration(durationMs: number) {
 
 function modelName(modelId: string, status: AppStatus) {
   if (modelId === status.modelId) return status.modelName;
-  return modelId.split("/").at(-1) ?? modelId;
+  const modelPath = modelId.split("/");
+  return modelPath[modelPath.length - 1] ?? modelId;
 }
