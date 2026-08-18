@@ -877,6 +877,14 @@ svg {
   padding-bottom: 15px;
 }
 
+.reference-list {
+  display: grid;
+  max-height: 210px;
+  gap: 6px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
 .reference-picker,
 .reference-card {
   display: flex;
@@ -906,6 +914,9 @@ svg {
 }
 
 .reference-picker:disabled { cursor: not-allowed; opacity: 0.5; }
+
+.reference-picker.compact { min-height: 42px; }
+.reference-picker.compact .reference-plus { width: 28px; height: 28px; }
 
 .reference-plus {
   display: grid;
@@ -950,6 +961,56 @@ svg {
   object-fit: cover;
 }
 
+.reference-card {
+  position: relative;
+  min-height: 50px;
+  gap: 8px;
+  padding: 4px 5px;
+  cursor: grab;
+  transition: border-color 120ms ease, opacity 120ms ease, transform 120ms ease;
+}
+
+.reference-card:hover { border-color: rgba(255, 255, 255, 0.15); }
+.reference-card.dragging { opacity: 0.45; transform: scale(0.985); }
+
+.reference-order {
+  display: grid;
+  width: 16px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--muted);
+  font-size: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.reference-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 1px;
+}
+
+.reference-actions > button {
+  display: grid;
+  width: 22px;
+  height: 24px;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  color: var(--muted);
+  background: transparent;
+  padding: 0;
+  cursor: default;
+  font-size: 11px;
+}
+
+.reference-actions > button:hover:not(:disabled) {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.reference-actions > button:disabled { opacity: 0.2; }
+
 .reference-info {
   min-width: 0;
   flex: 1;
@@ -957,6 +1018,11 @@ svg {
 }
 
 .reference-info strong { max-width: 100%; }
+
+.history-reference-list {
+  display: grid;
+  gap: 7px;
+}
 
 .remove-reference {
   display: grid;
@@ -966,7 +1032,7 @@ svg {
   place-items: center;
   border: 0;
   border-radius: 6px;
-  margin-left: auto;
+  margin-left: 0;
   color: var(--muted);
   background: transparent;
   cursor: default;

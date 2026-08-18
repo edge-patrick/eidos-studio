@@ -39,7 +39,7 @@ image generation alone.
 ## What it can do
 
 - Generate an image from a text prompt
-- Use one local image as a reference
+- Use up to 14 ordered local images as references (12 MB each, 48 MB combined)
 - Choose an aspect ratio and 1K, 2K, or 4K resolution
 - Browse successful, failed, and cancelled generations in a local image library
 - Reuse prompts, settings, and reference images from earlier generations
@@ -48,9 +48,9 @@ image generation alone.
 
 Prompts and reference images stay in the local Eidos library, but they are sent to OpenRouter and the model provider when you generate an image.
 
-## What's new in 0.3.0
+## What's new in 0.3.1
 
-Version 0.3.0 introduces the full local Library: paged generation history, fast image thumbnails, detailed inspection, full-size previews, prompt reuse, and permanent deletion of locally managed images. The Library remains available offline without an OpenRouter key.
+Version 0.3.1 adds up to 14 ordered reference images per generation, with reordering, safe per-image and combined size limits, efficient reference thumbnails, and complete multi-reference reuse from the local Library.
 
 ## Roadmap
 
@@ -60,7 +60,7 @@ Version 0.3.0 introduces the full local Library: paged generation history, fast 
 - [x] Aspect ratio and resolution controls
 - [x] Polished interface and refreshed branding
 - [x] A full history and image library
-- [ ] Multiple reference images
+- [x] Multiple reference images
 - [ ] More image models and settings
 - [ ] Side-by-side model comparison
 - [ ] More ways to save and share generated images

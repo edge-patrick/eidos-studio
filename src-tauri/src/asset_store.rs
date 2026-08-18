@@ -61,6 +61,12 @@ impl AssetStore {
         Ok(path)
     }
 
+    pub async fn stage_selection_thumbnail(&self, token: &str, bytes: &[u8]) -> AppResult<PathBuf> {
+        let path = self.selections_dir.join(format!("{token}.thumbnail.png"));
+        write_atomically(&path, bytes).await?;
+        Ok(path)
+    }
+
     pub async fn discard_selection(&self, path: &Path) -> AppResult<()> {
         if !path.starts_with(&self.selections_dir) {
             return Err(AppError::internal(
@@ -96,6 +102,22 @@ impl AssetStore {
             return Err(AppError::internal("thumbnail content hash was invalid"));
         }
         let storage_key = PathBuf::from("thumbnails").join(format!("{content_hash}.png"));
+        let path = self.root.join(&storage_key);
+        if !tokio::fs::try_exists(&path).await.map_err(AppError::file)? {
+            write_atomically(&path, bytes).await?;
+        }
+        Ok(storage_key)
+    }
+
+    pub async fn store_reference_thumbnail(
+        &self,
+        content_hash: &str,
+        bytes: &[u8],
+    ) -> AppResult<PathBuf> {
+        if !is_content_hash(content_hash) {
+            return Err(AppError::internal("thumbnail content hash was invalid"));
+        }
+        let storage_key = PathBuf::from("thumbnails").join(format!("{content_hash}-reference.png"));
         let path = self.root.join(&storage_key);
         if !tokio::fs::try_exists(&path).await.map_err(AppError::file)? {
             write_atomically(&path, bytes).await?;
@@ -173,7 +195,7 @@ impl AssetStore {
                 continue;
             }
             let path = entry.path();
-            let Some(content_hash) = object_hash(&path) else {
+            let Some(content_hash) = thumbnail_hash(&path) else {
                 continue;
             };
             if !persisted_hashes.contains(content_hash) {
@@ -224,6 +246,12 @@ impl AssetStore {
 
 fn object_hash(path: &Path) -> Option<&str> {
     let hash = path.file_stem()?.to_str()?;
+    is_content_hash(hash).then_some(hash)
+}
+
+fn thumbnail_hash(path: &Path) -> Option<&str> {
+    let stem = path.file_stem()?.to_str()?;
+    let hash = stem.strip_suffix("-reference").unwrap_or(stem);
     is_content_hash(hash).then_some(hash)
 }
 
@@ -356,6 +384,37 @@ mod tests {
             .expect("delete thumbnail");
         assert!(!asset.path.exists());
         assert!(!thumbnail_path.exists());
+
+        std::fs::remove_dir_all(root).expect("remove test directory");
+    }
+
+    #[tokio::test]
+    async fn reconciles_output_and_reference_thumbnail_variants() {
+        let root = std::env::temp_dir().join(format!("eidos-thumbnail-test-{}", Uuid::new_v4()));
+        let store = AssetStore::initialize(&root).expect("asset store");
+        let asset = store.store("png", b"shared image").await.expect("asset");
+        store
+            .store_thumbnail(&asset.content_hash, b"output thumbnail")
+            .await
+            .expect("output thumbnail");
+        store
+            .store_reference_thumbnail(&asset.content_hash, b"reference thumbnail")
+            .await
+            .expect("reference thumbnail");
+
+        let retained = HashSet::from([asset.content_hash.clone()]);
+        assert_eq!(
+            store
+                .delete_unreferenced_thumbnails(&retained)
+                .expect("retain thumbnails"),
+            0
+        );
+        assert_eq!(
+            store
+                .delete_unreferenced_thumbnails(&HashSet::new())
+                .expect("delete thumbnails"),
+            2
+        );
 
         std::fs::remove_dir_all(root).expect("remove test directory");
     }

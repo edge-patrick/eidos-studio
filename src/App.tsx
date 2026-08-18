@@ -17,6 +17,8 @@ const fallbackStatus: AppStatus = {
   modelName: "",
   supportedAspectRatios: [],
   supportedResolutions: [],
+  maxReferences: 14,
+  maxReferenceTotalBytes: 48 * 1024 * 1024,
 };
 
 function App() {

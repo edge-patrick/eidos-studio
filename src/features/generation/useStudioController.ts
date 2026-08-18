@@ -14,8 +14,14 @@ import {
 } from "./generationState";
 
 export function useStudioController(status: AppStatus) {
+  const maxReferences = status.maxReferences;
+  const maxReferenceTotalBytes = status.maxReferenceTotalBytes;
   const [prompt, setPrompt] = useState("");
-  const [reference, setReference] = useState<ReferenceSelection | null>(null);
+  const [references, setReferences] = useState<ReferenceSelection[]>([]);
+  const referenceTotalBytes = references.reduce(
+    (total, reference) => total + reference.sizeBytes,
+    0,
+  );
   const [referenceBusy, setReferenceBusy] = useState(false);
   const [aspectRatio, setAspectRatio] = useState("auto");
   const [resolution, setResolution] = useState("auto");
@@ -26,6 +32,7 @@ export function useStudioController(status: AppStatus) {
     initialGenerationState,
   );
   const activeRequestId = useRef<string | null>(null);
+  const pendingCancellationId = useRef<string | null>(null);
   const eventListenerReady = useRef<Promise<UnlistenFn> | null>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
@@ -52,6 +59,7 @@ export function useStudioController(status: AppStatus) {
         });
       }
       activeRequestId.current = null;
+      pendingCancellationId.current = null;
     });
     eventListenerReady.current = unlisten;
 
@@ -67,15 +75,25 @@ export function useStudioController(status: AppStatus) {
     return () => window.clearTimeout(timeout);
   }, [notice]);
 
-  async function chooseReference() {
+  async function chooseReferences() {
+    const selectedBytes = referenceTotalBytes;
+    const remainingBytes = Math.max(0, maxReferenceTotalBytes - selectedBytes);
+    if (references.length >= maxReferences || remainingBytes === 0) return;
     setReferenceBusy(true);
     setInputError(null);
     try {
-      const selection = await eidosApi.selectReference();
-      if (!selection) return;
-      const previous = reference;
-      setReference(selection);
-      if (previous) await eidosApi.discardReference(previous.token);
+      const selections = await eidosApi.selectReferences(selectedBytes);
+      if (selections.length === 0) return;
+      const available = maxReferences - references.length;
+      const accepted = selections.slice(0, available);
+      const overflow = selections.slice(available);
+      setReferences((current) => [...current, ...accepted]);
+      await Promise.all(
+        overflow.map((selection) => eidosApi.discardReference(selection.token)),
+      );
+      if (overflow.length > 0) {
+        setNotice(`Nano Banana accepts up to ${maxReferences} reference images.`);
+      }
     } catch (error) {
       setInputError(normalizeError(error));
     } finally {
@@ -83,10 +101,11 @@ export function useStudioController(status: AppStatus) {
     }
   }
 
-  async function removeReference() {
-    if (!reference) return;
-    const token = reference.token;
-    setReference(null);
+  async function removeReference(token: string) {
+    if (!references.some((reference) => reference.token === token)) return;
+    setReferences((current) =>
+      current.filter((reference) => reference.token !== token),
+    );
     try {
       await eidosApi.discardReference(token);
     } catch (error) {
@@ -94,10 +113,37 @@ export function useStudioController(status: AppStatus) {
     }
   }
 
+  function moveReference(sourceToken: string, targetToken: string) {
+    if (sourceToken === targetToken) return;
+    setReferences((current) => {
+      const sourceIndex = current.findIndex(({ token }) => token === sourceToken);
+      const targetIndex = current.findIndex(({ token }) => token === targetToken);
+      if (sourceIndex < 0 || targetIndex < 0) return current;
+      const next = [...current];
+      const [source] = next.splice(sourceIndex, 1);
+      next.splice(targetIndex, 0, source);
+      return next;
+    });
+  }
+
+  function shiftReference(token: string, offset: -1 | 1) {
+    setReferences((current) => {
+      const sourceIndex = current.findIndex((reference) => reference.token === token);
+      const targetIndex = sourceIndex + offset;
+      if (sourceIndex < 0 || targetIndex < 0 || targetIndex >= current.length) {
+        return current;
+      }
+      const next = [...current];
+      [next[sourceIndex], next[targetIndex]] = [next[targetIndex], next[sourceIndex]];
+      return next;
+    });
+  }
+
   async function generate() {
     if (
       !status.hasApiKey ||
       !prompt.trim() ||
+      referenceBusy ||
       generation.status === "generating"
     ) {
       return;
@@ -106,7 +152,7 @@ export function useStudioController(status: AppStatus) {
     const request: GenerateRequest = {
       requestId,
       prompt,
-      referenceToken: reference?.token ?? null,
+      referenceTokens: references.map(({ token }) => token),
       aspectRatio: aspectRatio === "auto" ? null : aspectRatio,
       resolution: resolution === "auto" ? null : resolution,
     };
@@ -122,13 +168,27 @@ export function useStudioController(status: AppStatus) {
       }
       await listener;
       await eidosApi.startGeneration(request);
+      if (
+        pendingCancellationId.current === requestId &&
+        activeRequestId.current === requestId
+      ) {
+        try {
+          const result = await eidosApi.cancelGeneration(requestId);
+          if (result.cancelled) pendingCancellationId.current = null;
+        } catch (error) {
+          setInputError(normalizeError(error));
+        }
+      }
     } catch (error) {
       activeRequestId.current = null;
-      dispatch({
-        type: "failed",
-        requestId,
-        error: normalizeError(error),
-      });
+      pendingCancellationId.current = null;
+      const normalized = normalizeError(error);
+      if (normalized.kind === "cancelled") {
+        dispatch({ type: "cancelled", requestId });
+        setNotice("Generation cancelled.");
+      } else {
+        dispatch({ type: "failed", requestId, error: normalized });
+      }
     }
   }
 
@@ -136,7 +196,10 @@ export function useStudioController(status: AppStatus) {
     if (generation.status !== "generating") return;
     setNotice("Stopping generation…");
     try {
-      await eidosApi.cancelGeneration(generation.requestId);
+      const result = await eidosApi.cancelGeneration(generation.requestId);
+      pendingCancellationId.current = result.cancelled
+        ? null
+        : generation.requestId;
     } catch (error) {
       setInputError(normalizeError(error));
     }
@@ -176,10 +239,10 @@ export function useStudioController(status: AppStatus) {
       throw new Error("Wait for the current generation to finish before editing history.");
     }
 
-    const nextReference = attempt.reference
-      ? await eidosApi.restoreHistoryReference(attempt.id)
-      : null;
-    const previousReference = reference;
+    const nextReferences = attempt.references.length > 0
+      ? await eidosApi.restoreHistoryReferences(attempt.id)
+      : [];
+    const previousReferences = references;
 
     setPrompt(attempt.prompt);
     setAspectRatio(
@@ -194,17 +257,17 @@ export function useStudioController(status: AppStatus) {
         ? attempt.settings.resolution
         : "auto",
     );
-    setReference(nextReference);
+    setReferences(nextReferences);
     setInputError(null);
     setNotice(null);
     dispatch({ type: "reset" });
 
-    if (previousReference) {
-      try {
-        await eidosApi.discardReference(previousReference.token);
-      } catch (error) {
-        setInputError(normalizeError(error));
-      }
+    try {
+      await Promise.all(
+        previousReferences.map(({ token }) => eidosApi.discardReference(token)),
+      );
+    } catch (error) {
+      setInputError(normalizeError(error));
     }
     window.setTimeout(() => promptRef.current?.focus(), 0);
   }
@@ -217,7 +280,10 @@ export function useStudioController(status: AppStatus) {
     prompt,
     setPrompt,
     promptRef,
-    reference,
+    references,
+    maxReferences,
+    maxReferenceTotalBytes,
+    referenceTotalBytes,
     referenceBusy,
     aspectRatio,
     setAspectRatio,
@@ -227,8 +293,10 @@ export function useStudioController(status: AppStatus) {
     generationError,
     notice,
     busy,
-    chooseReference,
+    chooseReferences,
     removeReference,
+    moveReference,
+    shiftReference,
     generate,
     cancelGeneration,
     saveResult,

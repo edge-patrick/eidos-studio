@@ -428,15 +428,23 @@ function HistoryInspector({
           <p>{attempt.prompt}</p>
         </section>
 
-        {attempt.reference && (
+        {attempt.references.length > 0 && (
           <section className="inspector-section">
-            <h3>Reference</h3>
-            <div className="history-reference">
-              <HistoryImage asset={attempt.reference} alt="Reference used for generation" />
-              <div>
-                <strong>Reference image</strong>
-                <span>{attempt.reference.width} × {attempt.reference.height}</span>
-              </div>
+            <h3>References</h3>
+            <div className="history-reference-list">
+              {attempt.references.map((reference, index) => (
+                <div className="history-reference" key={`${reference.assetPath}-${index}`}>
+                  <HistoryImage
+                    asset={reference}
+                    alt={`Reference ${index + 1} used for generation`}
+                    useThumbnail
+                  />
+                  <div>
+                    <strong>Reference {index + 1}</strong>
+                    <span>{reference.width} × {reference.height}</span>
+                  </div>
+                </div>
+              ))}
             </div>
           </section>
         )}
@@ -633,18 +641,43 @@ function LayeredHistoryImage({
   );
 }
 
-function HistoryImage({ asset, alt }: { asset: HistoryAsset; alt: string }) {
+function HistoryImage({
+  asset,
+  alt,
+  useThumbnail = false,
+}: {
+  asset: HistoryAsset;
+  alt: string;
+  useThumbnail?: boolean;
+}) {
+  const preferredPath = useThumbnail && asset.thumbnailPath
+    ? asset.thumbnailPath
+    : asset.assetPath;
+  const [sourcePath, setSourcePath] = useState(preferredPath);
   const [missing, setMissing] = useState(false);
+
+  useEffect(() => {
+    setSourcePath(preferredPath);
+    setMissing(false);
+  }, [preferredPath]);
+
   if (missing) {
     return <span className="missing-image"><WarningIcon /> Image unavailable</span>;
   }
   return (
     <img
-      src={eidosApi.assetUrl(asset.assetPath)}
+      src={eidosApi.assetUrl(sourcePath)}
       alt={alt}
       loading="lazy"
+      decoding="async"
       draggable={false}
-      onError={() => setMissing(true)}
+      onError={() => {
+        if (sourcePath !== asset.assetPath) {
+          setSourcePath(asset.assetPath);
+        } else {
+          setMissing(true);
+        }
+      }}
     />
   );
 }

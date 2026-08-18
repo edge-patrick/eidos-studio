@@ -4,6 +4,8 @@ export interface AppStatus {
   modelName: string;
   supportedAspectRatios: string[];
   supportedResolutions: string[];
+  maxReferences: number;
+  maxReferenceTotalBytes: number;
 }
 
 export interface AppError {
@@ -19,13 +21,15 @@ export interface ReferenceSelection {
   mimeType: string;
   width: number;
   height: number;
+  sizeBytes: number;
   assetPath: string;
+  thumbnailPath: string;
 }
 
 export interface GenerateRequest {
   requestId: string;
   prompt: string;
-  referenceToken: string | null;
+  referenceTokens: string[];
   aspectRatio: string | null;
   resolution: string | null;
 }
@@ -86,7 +90,7 @@ export interface HistoryAttempt {
   errorKind?: string;
   errorMessage?: string;
   output?: HistoryAsset;
-  reference?: HistoryAsset;
+  references: HistoryAsset[];
 }
 
 export interface HistoryCursor {

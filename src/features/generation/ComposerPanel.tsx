@@ -7,7 +7,7 @@ import {
   PlusIcon,
 } from "../../components/Icons";
 import { eidosApi } from "../../shared/eidosApi";
-import type { AppStatus } from "../../shared/types";
+import type { AppStatus, ReferenceSelection } from "../../shared/types";
 import type { StudioController } from "./useStudioController";
 
 interface ComposerPanelProps {
@@ -23,6 +23,7 @@ const upcomingModels = [
 
 export function ComposerPanel({ status, studio }: ComposerPanelProps) {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [draggedReference, setDraggedReference] = useState<string | null>(null);
   const modelPickerRef = useRef<HTMLDetailsElement>(null);
   const modelPickerSummaryRef = useRef<HTMLElement>(null);
 
@@ -192,37 +193,91 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
       <div className="composer-section reference-section">
         <div className="section-heading">
           <span>03</span>
-          <span>Reference</span>
-          <small>Optional</small>
+          <span>References</span>
+          <small>
+            {studio.references.length > 0
+              ? `${studio.references.length} / ${studio.maxReferences}`
+              : "Optional"}
+          </small>
         </div>
 
-        {studio.reference ? (
-          <div className="reference-card">
-            <img
-              src={eidosApi.assetUrl(studio.reference.assetPath)}
-              alt="Selected reference"
-            />
-            <div className="reference-info">
-              <strong>{studio.reference.fileName}</strong>
-              <span>
-                {studio.reference.width} × {studio.reference.height}
-              </span>
-            </div>
-            <button
-              className="remove-reference"
-              type="button"
-              onClick={() => void studio.removeReference()}
-              disabled={studio.busy}
-              aria-label="Remove reference image"
-            >
-              <CloseIcon />
-            </button>
+        {studio.references.length > 0 && (
+          <div
+            className="reference-list"
+            role="list"
+            aria-label="Selected reference images"
+          >
+            {studio.references.map((reference, index) => (
+              <div
+                className={`reference-card${draggedReference === reference.token ? " dragging" : ""}`}
+                key={reference.token}
+                role="listitem"
+                draggable={!studio.busy}
+                onDragStart={(event) => {
+                  setDraggedReference(reference.token);
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", reference.token);
+                }}
+                onDragEnd={() => setDraggedReference(null)}
+                onDragOver={(event) => {
+                  if (!studio.busy) event.preventDefault();
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const sourceToken =
+                    draggedReference || event.dataTransfer.getData("text/plain");
+                  studio.moveReference(sourceToken, reference.token);
+                  setDraggedReference(null);
+                }}
+              >
+                <span className="reference-order" aria-hidden="true">
+                  {index + 1}
+                </span>
+                <ReferenceThumbnail reference={reference} index={index} />
+                <div className="reference-info">
+                  <strong>{reference.fileName}</strong>
+                  <span>
+                    {reference.width} × {reference.height}
+                  </span>
+                </div>
+                <div className="reference-actions">
+                  <button
+                    type="button"
+                    onClick={() => studio.shiftReference(reference.token, -1)}
+                    disabled={studio.busy || index === 0}
+                    aria-label={`Move ${reference.fileName} earlier`}
+                  >
+                    <span aria-hidden="true">↑</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => studio.shiftReference(reference.token, 1)}
+                    disabled={studio.busy || index === studio.references.length - 1}
+                    aria-label={`Move ${reference.fileName} later`}
+                  >
+                    <span aria-hidden="true">↓</span>
+                  </button>
+                  <button
+                    className="remove-reference"
+                    type="button"
+                    onClick={() => void studio.removeReference(reference.token)}
+                    disabled={studio.busy}
+                    aria-label={`Remove ${reference.fileName}`}
+                  >
+                    <CloseIcon />
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
-        ) : (
+        )}
+
+        {studio.references.length < studio.maxReferences &&
+          studio.referenceTotalBytes < studio.maxReferenceTotalBytes && (
           <button
-            className="reference-picker"
+            className={`reference-picker${studio.references.length > 0 ? " compact" : ""}`}
             type="button"
-            onClick={() => void studio.chooseReference()}
+            onClick={() => void studio.chooseReferences()}
             disabled={studio.referenceBusy || studio.busy}
           >
             <span className="reference-plus" aria-hidden="true">
@@ -230,9 +285,16 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
             </span>
             <div className="reference-copy">
               <strong>
-                {studio.referenceBusy ? "Opening files…" : "Add an image"}
+                {studio.referenceBusy
+                  ? "Opening files…"
+                  : studio.references.length > 0
+                    ? "Add more images"
+                    : "Add reference images"}
               </strong>
-              <span>PNG, JPEG or WebP · 12 MB max</span>
+              <span>
+                PNG, JPEG or WebP · 12 MB each ·{" "}
+                {Math.round(studio.maxReferenceTotalBytes / 1024 / 1024)} MB total
+              </span>
             </div>
           </button>
         )}
@@ -278,7 +340,12 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
           className="primary-button generate-button"
           type="button"
           onClick={generate}
-          disabled={!status.hasApiKey || !studio.prompt.trim() || studio.busy}
+          disabled={
+            !status.hasApiKey ||
+            !studio.prompt.trim() ||
+            studio.referenceBusy ||
+            studio.busy
+          }
           title={
             status.hasApiKey
               ? undefined
@@ -290,6 +357,35 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
         </button>
       </div>
     </section>
+  );
+}
+
+function ReferenceThumbnail({
+  reference,
+  index,
+}: {
+  reference: ReferenceSelection;
+  index: number;
+}) {
+  const [sourcePath, setSourcePath] = useState(reference.thumbnailPath);
+
+  useEffect(() => {
+    setSourcePath(reference.thumbnailPath);
+  }, [reference.thumbnailPath]);
+
+  return (
+    <img
+      src={eidosApi.assetUrl(sourcePath)}
+      alt={`Reference ${index + 1}`}
+      loading="lazy"
+      decoding="async"
+      draggable={false}
+      onError={() => {
+        if (sourcePath !== reference.assetPath) {
+          setSourcePath(reference.assetPath);
+        }
+      }}
+    />
   );
 }
 

@@ -112,6 +112,12 @@ const MIGRATIONS: &[(&str, &str)] = &[
         );
     "#,
     ),
+    (
+        "005_reference_thumbnails",
+        r#"
+        ALTER TABLE assets ADD COLUMN reference_thumbnail_path TEXT;
+    "#,
+    ),
 ];
 
 pub struct Database {
@@ -218,7 +224,7 @@ impl Database {
         model_id: &str,
         reference_count: i64,
         settings_json: &str,
-        reference: Option<NewAsset<'_>>,
+        references: Vec<NewAsset<'_>>,
     ) -> AppResult<()> {
         let transaction = self.connection.transaction().map_err(AppError::storage)?;
         transaction
@@ -227,7 +233,7 @@ impl Database {
                 params![id, prompt, model_id, reference_count, settings_json, Utc::now().to_rfc3339()],
             )
             .map_err(AppError::storage)?;
-        if let Some(reference) = reference {
+        for reference in references {
             upsert_and_link_asset(&transaction, id, reference)?;
         }
         transaction.commit().map_err(AppError::storage)?;
@@ -336,24 +342,13 @@ impl Database {
                     output.width,
                     output.height,
                     output.thumbnail_path,
-                    output.content_hash,
-                    reference.local_path,
-                    reference.mime_type,
-                    reference.width,
-                    reference.height,
-                    reference.thumbnail_path,
-                    reference.content_hash
+                    output.content_hash
                 FROM generation_attempts attempts
                 LEFT JOIN attempt_assets output_link
                     ON output_link.generation_id = attempts.id
                     AND output_link.role = 'output'
                     AND output_link.sort_order = 0
                 LEFT JOIN assets output ON output.id = output_link.asset_id
-                LEFT JOIN attempt_assets reference_link
-                    ON reference_link.generation_id = attempts.id
-                    AND reference_link.role = 'reference'
-                    AND reference_link.sort_order = 0
-                LEFT JOIN assets reference ON reference.id = reference_link.asset_id
                 WHERE attempts.status IN ('succeeded', 'failed', 'cancelled')
                   AND (
                     ?1 IS NULL
@@ -387,13 +382,18 @@ impl Database {
                         error_kind: row.get(10)?,
                         error_message: row.get(11)?,
                         output: history_asset_from_row(row, 12)?,
-                        reference: history_asset_from_row(row, 18)?,
+                        references: Vec::new(),
                     })
                 },
             )
             .map_err(AppError::storage)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(AppError::storage)?;
+
+        drop(statement);
+        for attempt in &mut attempts {
+            attempt.references = self.references_for_attempt(&attempt.id)?;
+        }
 
         let has_more = attempts.len() > limit;
         if has_more {
@@ -416,30 +416,32 @@ impl Database {
         })
     }
 
-    pub fn reference_for_attempt(&self, id: &str) -> AppResult<Option<HistoryAsset>> {
-        self.connection
-            .query_row(
+    pub fn references_for_attempt(&self, id: &str) -> AppResult<Vec<HistoryAsset>> {
+        let mut statement = self
+            .connection
+            .prepare(
                 "SELECT assets.local_path, assets.mime_type, assets.width, assets.height,
-                        assets.thumbnail_path, assets.content_hash
+                        assets.reference_thumbnail_path, assets.content_hash
                  FROM attempt_assets
                  JOIN assets ON assets.id = attempt_assets.asset_id
                  WHERE attempt_assets.generation_id = ?1
                    AND attempt_assets.role = 'reference'
-                 ORDER BY attempt_assets.sort_order
-                 LIMIT 1",
-                [id],
-                |row| {
-                    Ok(HistoryAsset {
-                        asset_path: row.get(0)?,
-                        mime_type: row.get(1)?,
-                        width: row.get(2)?,
-                        height: row.get(3)?,
-                        thumbnail_path: row.get(4)?,
-                        content_hash: row.get(5)?,
-                    })
-                },
+                 ORDER BY attempt_assets.sort_order",
             )
-            .optional()
+            .map_err(AppError::storage)?;
+        statement
+            .query_map([id], |row| {
+                Ok(HistoryAsset {
+                    asset_path: row.get(0)?,
+                    mime_type: row.get(1)?,
+                    width: row.get(2)?,
+                    height: row.get(3)?,
+                    thumbnail_path: row.get(4)?,
+                    content_hash: row.get(5)?,
+                })
+            })
+            .map_err(AppError::storage)?
+            .collect::<Result<Vec<_>, _>>()
             .map_err(AppError::storage)
     }
 
@@ -448,7 +450,8 @@ impl Database {
         let linked_assets = {
             let mut statement = transaction
                 .prepare(
-                    "SELECT DISTINCT assets.id, assets.local_path, assets.thumbnail_path
+                    "SELECT DISTINCT assets.id, assets.local_path, assets.thumbnail_path,
+                            assets.reference_thumbnail_path
                      FROM attempt_assets
                      JOIN assets ON assets.id = attempt_assets.asset_id
                      WHERE attempt_assets.generation_id = ?1",
@@ -460,6 +463,7 @@ impl Database {
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
                     ))
                 })
                 .map_err(AppError::storage)?
@@ -478,7 +482,7 @@ impl Database {
 
         let mut unreferenced_paths = Vec::new();
         if deleted {
-            for (asset_id, local_path, thumbnail_path) in linked_assets {
+            for (asset_id, local_path, thumbnail_path, reference_thumbnail_path) in linked_assets {
                 let still_linked = transaction
                     .query_row(
                         "SELECT EXISTS(SELECT 1 FROM attempt_assets WHERE asset_id = ?1)",
@@ -490,7 +494,9 @@ impl Database {
                     transaction
                         .execute("DELETE FROM assets WHERE id = ?1", [&asset_id])
                         .map_err(AppError::storage)?;
-                    let paths = std::iter::once(local_path).chain(thumbnail_path);
+                    let paths = std::iter::once(local_path)
+                        .chain(thumbnail_path)
+                        .chain(reference_thumbnail_path);
                     for path in paths {
                         transaction
                             .execute(
@@ -534,12 +540,24 @@ impl Database {
         transaction.commit().map_err(AppError::storage)
     }
 
-    pub fn set_asset_thumbnail(&self, content_hash: &str, path: &Path) -> AppResult<bool> {
+    pub fn set_asset_thumbnail(
+        &self,
+        content_hash: &str,
+        path: &Path,
+        reference_preview: bool,
+    ) -> AppResult<bool> {
+        let column = if reference_preview {
+            "reference_thumbnail_path"
+        } else {
+            "thumbnail_path"
+        };
         self.connection
             .execute(
-                "UPDATE assets
-                 SET thumbnail_path = COALESCE(thumbnail_path, ?2)
-                 WHERE content_hash = ?1",
+                &format!(
+                    "UPDATE assets
+                     SET {column} = COALESCE({column}, ?2)
+                     WHERE content_hash = ?1"
+                ),
                 params![content_hash, path.to_string_lossy()],
             )
             .map(|updated| updated == 1)
@@ -584,17 +602,27 @@ fn upsert_and_link_asset(
     generation_id: &str,
     asset: NewAsset<'_>,
 ) -> AppResult<()> {
+    let thumbnail_path = asset
+        .thumbnail_path
+        .map(|path| path.to_string_lossy().into_owned());
+    let (output_thumbnail_path, reference_thumbnail_path) = if asset.role == "reference" {
+        (None, thumbnail_path)
+    } else {
+        (thumbnail_path, None)
+    };
     transaction
         .execute(
-            "INSERT INTO assets(id, content_hash, local_path, thumbnail_path, mime_type, width, height, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            "INSERT INTO assets(id, content_hash, local_path, thumbnail_path, reference_thumbnail_path, mime_type, width, height, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(content_hash) DO UPDATE SET
-                thumbnail_path = COALESCE(assets.thumbnail_path, excluded.thumbnail_path)",
+                thumbnail_path = COALESCE(assets.thumbnail_path, excluded.thumbnail_path),
+                reference_thumbnail_path = COALESCE(assets.reference_thumbnail_path, excluded.reference_thumbnail_path)",
             params![
                 asset.id,
                 asset.content_hash,
                 asset.local_path.to_string_lossy(),
-                asset.thumbnail_path.map(|path| path.to_string_lossy()),
+                output_thumbnail_path,
+                reference_thumbnail_path,
                 asset.mime_type,
                 asset.width,
                 asset.height,
@@ -641,7 +669,7 @@ mod tests {
                 "test/model",
                 0,
                 r#"{"aspectRatio":"1:1","resolution":"1K"}"#,
-                None,
+                Vec::new(),
             )
             .expect("attempt");
         let output_path = Path::new("/tmp/eidos-test-output.png");
@@ -683,10 +711,73 @@ mod tests {
     }
 
     #[test]
+    fn records_and_returns_ordered_references() {
+        let mut database = Database::open(Path::new(":memory:")).expect("database");
+        database
+            .start_attempt(
+                "attempt-1",
+                "Combine these references",
+                "test/model",
+                2,
+                "{}",
+                vec![
+                    NewAsset {
+                        id: "reference-2",
+                        content_hash: "reference-hash-2",
+                        role: "reference",
+                        local_path: Path::new("objects/reference-2.png"),
+                        thumbnail_path: None,
+                        mime_type: "image/png",
+                        width: 20,
+                        height: 20,
+                        sort_order: 1,
+                    },
+                    NewAsset {
+                        id: "reference-1",
+                        content_hash: "reference-hash-1",
+                        role: "reference",
+                        local_path: Path::new("objects/reference-1.png"),
+                        thumbnail_path: Some(Path::new(
+                            "thumbnails/reference-hash-1-reference.png",
+                        )),
+                        mime_type: "image/png",
+                        width: 10,
+                        height: 10,
+                        sort_order: 0,
+                    },
+                ],
+            )
+            .expect("attempt");
+        database
+            .mark_failed("attempt-1", 10, &AppError::internal("test"))
+            .expect("terminal attempt");
+
+        let references = database
+            .references_for_attempt("attempt-1")
+            .expect("references");
+        assert_eq!(references.len(), 2);
+        assert_eq!(references[0].asset_path, "objects/reference-1.png");
+        assert_eq!(
+            references[0].thumbnail_path.as_deref(),
+            Some("thumbnails/reference-hash-1-reference.png")
+        );
+        assert_eq!(references[1].asset_path, "objects/reference-2.png");
+
+        let history = database.list_history(None, 10).expect("history");
+        assert_eq!(history.attempts[0].references.len(), 2);
+
+        let (deleted, paths) = database
+            .delete_history_attempt("attempt-1")
+            .expect("delete attempt");
+        assert!(deleted);
+        assert!(paths.contains(&PathBuf::from("thumbnails/reference-hash-1-reference.png")));
+    }
+
+    #[test]
     fn recovers_attempts_interrupted_by_process_exit() {
         let mut database = Database::open(Path::new(":memory:")).expect("database");
         database
-            .start_attempt("attempt-1", "Prompt", "test/model", 0, "{}", None)
+            .start_attempt("attempt-1", "Prompt", "test/model", 0, "{}", Vec::new())
             .expect("attempt");
 
         assert_eq!(
@@ -709,7 +800,7 @@ mod tests {
     fn completing_a_non_running_attempt_does_not_link_an_asset() {
         let mut database = Database::open(Path::new(":memory:")).expect("database");
         database
-            .start_attempt("attempt-1", "Prompt", "test/model", 0, "{}", None)
+            .start_attempt("attempt-1", "Prompt", "test/model", 0, "{}", Vec::new())
             .expect("attempt");
         database
             .mark_cancelled("attempt-1", 10)
@@ -795,7 +886,7 @@ mod tests {
 
         handle
             .execute(|database| {
-                database.start_attempt("attempt-1", "Prompt", "test/model", 0, "{}", None)
+                database.start_attempt("attempt-1", "Prompt", "test/model", 0, "{}", Vec::new())
             })
             .await
             .expect("worker operation");
@@ -811,7 +902,14 @@ mod tests {
     fn history_includes_all_terminal_attempts() {
         let mut database = Database::open(Path::new(":memory:")).expect("database");
         database
-            .start_attempt("success", "A finished prompt", "test/model", 0, "{}", None)
+            .start_attempt(
+                "success",
+                "A finished prompt",
+                "test/model",
+                0,
+                "{}",
+                Vec::new(),
+            )
             .expect("successful attempt");
         database
             .complete_attempt(
@@ -833,7 +931,14 @@ mod tests {
             )
             .expect("complete attempt");
         database
-            .start_attempt("failure", "A failed prompt", "test/model", 0, "{}", None)
+            .start_attempt(
+                "failure",
+                "A failed prompt",
+                "test/model",
+                0,
+                "{}",
+                Vec::new(),
+            )
             .expect("failed attempt");
         database
             .mark_failed(
@@ -853,7 +958,7 @@ mod tests {
                 "test/model",
                 0,
                 "{}",
-                None,
+                Vec::new(),
             )
             .expect("cancelled attempt");
         database
@@ -884,7 +989,7 @@ mod tests {
         let mut database = Database::open(Path::new(":memory:")).expect("database");
         for id in ["oldest", "middle", "newest"] {
             database
-                .start_attempt(id, "Prompt", "test/model", 0, "{}", None)
+                .start_attempt(id, "Prompt", "test/model", 0, "{}", Vec::new())
                 .expect("attempt");
             database
                 .mark_failed(id, 10, &AppError::internal("failed"))
@@ -934,7 +1039,7 @@ mod tests {
     fn deletion_removes_cancelled_attempts() {
         let mut database = Database::open(Path::new(":memory:")).expect("database");
         database
-            .start_attempt("cancelled", "Prompt", "test/model", 0, "{}", None)
+            .start_attempt("cancelled", "Prompt", "test/model", 0, "{}", Vec::new())
             .expect("attempt");
         database
             .mark_cancelled("cancelled", 10)
@@ -960,7 +1065,7 @@ mod tests {
         let mut database = Database::open(Path::new(":memory:")).expect("database");
         for (attempt_id, asset_id) in [("first", "asset-one"), ("second", "asset-two")] {
             database
-                .start_attempt(attempt_id, "Prompt", "test/model", 0, "{}", None)
+                .start_attempt(attempt_id, "Prompt", "test/model", 0, "{}", Vec::new())
                 .expect("attempt");
             database
                 .complete_attempt(

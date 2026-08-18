@@ -28,11 +28,15 @@ type GenerationListener = (event: { payload: GenerationJobEvent }) => void;
 let generationListeners: GenerationListener[] = [];
 
 function historyPage(
-  attempts: HistoryAttempt[],
+  attempts: Array<Omit<HistoryAttempt, "references"> & { references?: HistoryAttempt["references"] }>,
   nextCursor: HistoryCursor | null = null,
   totalCount = attempts.length,
 ) {
-  return { attempts, nextCursor, totalCount };
+  return {
+    attempts: attempts.map((attempt) => ({ ...attempt, references: attempt.references ?? [] })),
+    nextCursor,
+    totalCount,
+  };
 }
 
 function emitGeneration(payload: GenerationJobEvent) {
@@ -45,6 +49,8 @@ const appStatus = {
   modelName: "Nano Banana",
   supportedAspectRatios: ["1:1", "2:3", "3:2", "16:9"],
   supportedResolutions: ["1K", "2K", "4K"],
+  maxReferences: 14,
+  maxReferenceTotalBytes: 48 * 1024 * 1024,
 };
 
 describe("App", () => {
@@ -69,6 +75,8 @@ describe("App", () => {
       modelName: "Nano Banana",
       supportedAspectRatios: ["1:1", "2:3", "3:2", "16:9"],
       supportedResolutions: ["1K", "2K", "4K"],
+      maxReferences: 14,
+      maxReferenceTotalBytes: 48 * 1024 * 1024,
     });
 
     render(<App />);
@@ -201,12 +209,146 @@ describe("App", () => {
         request: {
           requestId: expect.any(String),
           prompt: "A wide night landscape",
-          referenceToken: null,
+          referenceTokens: [],
           aspectRatio: "16:9",
           resolution: "2K",
         },
       });
     });
+  });
+
+  it("selects, reorders, and submits multiple reference images", async () => {
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "get_app_status") return appStatus;
+      if (command === "select_reference_image") {
+        return [
+          {
+            token: "reference-a",
+            fileName: "a.png",
+            mimeType: "image/png",
+            width: 800,
+            height: 600,
+            sizeBytes: 2 * 1024 * 1024,
+            assetPath: "/managed/a.png",
+            thumbnailPath: "/managed/a-thumbnail.png",
+          },
+          {
+            token: "reference-b",
+            fileName: "b.jpg",
+            mimeType: "image/jpeg",
+            width: 600,
+            height: 800,
+            sizeBytes: 3 * 1024 * 1024,
+            assetPath: "/managed/b.jpg",
+            thumbnailPath: "/managed/b-thumbnail.png",
+          },
+        ];
+      }
+      if (command === "start_generation") {
+        return {
+          requestId: (args as { request: { requestId: string } }).request.requestId,
+        };
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    render(<App />);
+    const prompt = await screen.findByPlaceholderText(
+      "Describe the image you want to make…",
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /Add reference images/ }),
+    );
+
+    expect(await screen.findByText("a.png")).toBeInTheDocument();
+    expect(screen.getByText("b.jpg")).toBeInTheDocument();
+    expect(convertFileSrcMock).toHaveBeenCalledWith("/managed/a-thumbnail.png");
+    expect(convertFileSrcMock).toHaveBeenCalledWith("/managed/b-thumbnail.png");
+    expect(screen.getByText("2 / 14")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Move b.jpg earlier" }));
+    fireEvent.change(prompt, { target: { value: "Blend both references" } });
+    fireEvent.click(screen.getByRole("button", { name: "Generate image" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("start_generation", {
+        request: {
+          requestId: expect.any(String),
+          prompt: "Blend both references",
+          referenceTokens: ["reference-b", "reference-a"],
+          aspectRatio: null,
+          resolution: null,
+        },
+      });
+    });
+  });
+
+  it("does not generate while reference images are still importing", async () => {
+    let finishSelection!: (value: []) => void;
+    invokeMock.mockImplementation(async (command) => {
+      if (command === "get_app_status") return appStatus;
+      if (command === "select_reference_image") {
+        return new Promise<[]>((resolve) => {
+          finishSelection = resolve;
+        });
+      }
+      if (command === "start_generation") {
+        throw new Error("Generation started before reference import completed.");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    render(<App />);
+    const prompt = await screen.findByPlaceholderText(
+      "Describe the image you want to make…",
+    );
+    fireEvent.change(prompt, { target: { value: "Use the incoming references" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Add reference images/ }),
+    );
+
+    const generate = screen.getByRole("button", { name: "Generate image" });
+    expect(generate).toBeDisabled();
+    fireEvent.keyDown(prompt, { key: "Enter", metaKey: true });
+    expect(
+      invokeMock.mock.calls.some(([command]) => command === "start_generation"),
+    ).toBe(false);
+
+    await act(async () => finishSelection([]));
+    expect(generate).toBeEnabled();
+  });
+
+  it("retries cancellation when generation has not registered yet", async () => {
+    let finishStart!: (value: { requestId: string }) => void;
+    let requestId = "";
+    let cancellationCalls = 0;
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "get_app_status") return appStatus;
+      if (command === "start_generation") {
+        requestId = (args as { request: { requestId: string } }).request.requestId;
+        return new Promise<{ requestId: string }>((resolve) => {
+          finishStart = resolve;
+        });
+      }
+      if (command === "cancel_generation") {
+        cancellationCalls += 1;
+        return { cancelled: cancellationCalls > 1 };
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    render(<App />);
+    const prompt = await screen.findByPlaceholderText(
+      "Describe the image you want to make…",
+    );
+    fireEvent.change(prompt, { target: { value: "Cancel while preparing" } });
+    fireEvent.click(screen.getByRole("button", { name: "Generate image" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Cancel generation" }),
+    );
+
+    await waitFor(() => expect(cancellationCalls).toBe(1));
+    await act(async () => finishStart({ requestId }));
+    await waitFor(() => expect(cancellationCalls).toBe(2));
   });
 
   it("renders a completed job from its managed asset path", async () => {
@@ -282,6 +424,22 @@ describe("App", () => {
             durationMs: 500,
             errorKind: "provider",
             errorMessage: "The provider rejected this request.",
+            references: [
+              {
+                assetPath: "/managed/reference-1.png",
+                thumbnailPath: "/managed/thumbnails/reference-1.png",
+                mimeType: "image/png",
+                width: 640,
+                height: 480,
+              },
+              {
+                assetPath: "/managed/reference-2.jpg",
+                thumbnailPath: "/managed/thumbnails/reference-2.png",
+                mimeType: "image/jpeg",
+                width: 480,
+                height: 640,
+              },
+            ],
           },
           {
             id: "cancelled-1",
@@ -295,6 +453,30 @@ describe("App", () => {
             errorMessage: "Generation cancelled by the user.",
           },
         ]);
+      }
+      if (command === "restore_history_reference") {
+        return [
+          {
+            token: "saved-reference-1",
+            fileName: "Saved reference 1",
+            mimeType: "image/png",
+            width: 640,
+            height: 480,
+            sizeBytes: 1024,
+            assetPath: "/managed/saved-reference-1.png",
+            thumbnailPath: "/managed/saved-reference-1-thumbnail.png",
+          },
+          {
+            token: "saved-reference-2",
+            fileName: "Saved reference 2",
+            mimeType: "image/jpeg",
+            width: 480,
+            height: 640,
+            sizeBytes: 2048,
+            assetPath: "/managed/saved-reference-2.jpg",
+            thumbnailPath: "/managed/saved-reference-2-thumbnail.png",
+          },
+        ];
       }
       throw new Error(`Unexpected command: ${command}`);
     });
@@ -332,6 +514,10 @@ describe("App", () => {
     fireEvent.click(failedPrompt.closest("button")!);
     expect(screen.getByText("Image not made")).toBeInTheDocument();
     expect(screen.getByText("The provider rejected this request.")).toBeInTheDocument();
+    expect(screen.getByAltText("Reference 1 used for generation")).toHaveAttribute(
+      "src",
+      "asset://localhost//managed/thumbnails/reference-1.png",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
     expect(
@@ -339,6 +525,9 @@ describe("App", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "16:9" })).toHaveClass("selected");
     expect(screen.getByRole("button", { name: "1K" })).toHaveClass("selected");
+    expect(await screen.findByText("Saved reference 1")).toBeInTheDocument();
+    expect(screen.getByText("Saved reference 2")).toBeInTheDocument();
+    expect(screen.getByText("2 / 14")).toBeInTheDocument();
   });
 
   it("loads older history in bounded pages", async () => {

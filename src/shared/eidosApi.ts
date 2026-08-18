@@ -50,8 +50,8 @@ export const eidosApi = {
   saveApiKey: (apiKey: string) =>
     invoke<AppStatus>("save_api_key", { apiKey }),
   removeApiKey: () => invoke<void>("remove_api_key"),
-  selectReference: () =>
-    invoke<ReferenceSelection | null>("select_reference_image"),
+  selectReferences: (selectedBytes: number) =>
+    invoke<ReferenceSelection[]>("select_reference_image", { selectedBytes }),
   discardReference: (token: string) =>
     invoke<void>("discard_reference", { token }),
   startGeneration: (request: GenerateRequest) =>
@@ -62,8 +62,8 @@ export const eidosApi = {
     invoke<SaveResult | null>("save_output", { attemptId }),
   listHistory: (cursor: HistoryCursor | null = null, limit = 60) =>
     invoke<HistoryPage>("list_history", { cursor, limit }),
-  restoreHistoryReference: (attemptId: string) =>
-    invoke<ReferenceSelection | null>("restore_history_reference", {
+  restoreHistoryReferences: (attemptId: string) =>
+    invoke<ReferenceSelection[]>("restore_history_reference", {
       attemptId,
     }),
   deleteHistoryAttempt: (attemptId: string) =>

@@ -99,18 +99,13 @@ impl OpenRouterClient {
         api_key: &str,
         prompt: &str,
         settings: &GenerationSettings,
-        reference: Option<(&str, &[u8])>,
+        references: &[(&str, &[u8])],
         cancellation: &CancellationToken,
     ) -> AppResult<GeneratedImage> {
         let mut payload = generation_payload(prompt, settings);
 
-        if let Some((mime_type, bytes)) = reference {
-            payload["input_references"] = json!([{
-                "type": "image_url",
-                "image_url": {
-                    "url": format!("data:{mime_type};base64,{}", BASE64.encode(bytes))
-                }
-            }]);
+        if !references.is_empty() {
+            payload["input_references"] = Value::Array(reference_payload(references));
         }
 
         let send = self
@@ -284,6 +279,20 @@ fn generation_payload(prompt: &str, settings: &GenerationSettings) -> Value {
     }
 
     payload
+}
+
+fn reference_payload(references: &[(&str, &[u8])]) -> Vec<Value> {
+    references
+        .iter()
+        .map(|(mime_type, bytes)| {
+            json!({
+                "type": "image_url",
+                "image_url": {
+                    "url": format!("data:{mime_type};base64,{}", BASE64.encode(bytes))
+                }
+            })
+        })
+        .collect()
 }
 
 fn split_data_url(value: &str) -> (Option<String>, &str) {
@@ -519,6 +528,21 @@ mod tests {
     }
 
     #[test]
+    fn preserves_reference_order_in_payload() {
+        let references = reference_payload(&[("image/png", b"first"), ("image/jpeg", b"second")]);
+
+        assert_eq!(references.len(), 2);
+        assert_eq!(
+            references[0]["image_url"]["url"],
+            "data:image/png;base64,Zmlyc3Q="
+        );
+        assert_eq!(
+            references[1]["image_url"]["url"],
+            "data:image/jpeg;base64,c2Vjb25k"
+        );
+    }
+
+    #[test]
     fn identifies_generated_candidate_blocks() {
         let body = br#"{
             "error": {
@@ -587,7 +611,7 @@ mod tests {
                     aspect_ratio: Some("1:1".to_owned()),
                     resolution: Some("1K".to_owned()),
                 },
-                None,
+                &[],
                 &CancellationToken::new(),
             )
             .await

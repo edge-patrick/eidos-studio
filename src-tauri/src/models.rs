@@ -6,6 +6,8 @@ pub const IMAGE_MODEL_ID: &str = "google/gemini-3.1-flash-image";
 pub const IMAGE_MODEL_NAME: &str = "Nano Banana";
 pub const MAX_PROMPT_CHARS: usize = 8_000;
 pub const MAX_REFERENCE_BYTES: u64 = 12 * 1024 * 1024;
+pub const MAX_REFERENCE_TOTAL_BYTES: u64 = 48 * 1024 * 1024;
+pub const MAX_REFERENCES: usize = 14;
 pub const SUPPORTED_ASPECT_RATIOS: &[&str] = &["1:1", "2:3", "3:2", "16:9"];
 pub const SUPPORTED_RESOLUTIONS: &[&str] = &["1K", "2K", "4K"];
 
@@ -17,6 +19,8 @@ pub struct AppStatus {
     pub model_name: &'static str,
     pub supported_aspect_ratios: &'static [&'static str],
     pub supported_resolutions: &'static [&'static str],
+    pub max_references: usize,
+    pub max_reference_total_bytes: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -27,7 +31,9 @@ pub struct ReferenceSelection {
     pub mime_type: String,
     pub width: u32,
     pub height: u32,
+    pub size_bytes: u64,
     pub asset_path: String,
+    pub thumbnail_path: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -35,7 +41,8 @@ pub struct ReferenceSelection {
 pub struct GenerateRequest {
     pub request_id: String,
     pub prompt: String,
-    pub reference_token: Option<String>,
+    #[serde(default)]
+    pub reference_tokens: Vec<String>,
     pub aspect_ratio: Option<String>,
     pub resolution: Option<String>,
 }
@@ -78,7 +85,7 @@ pub struct HistoryAttempt {
     pub error_kind: Option<String>,
     pub error_message: Option<String>,
     pub output: Option<HistoryAsset>,
-    pub reference: Option<HistoryAsset>,
+    pub references: Vec<HistoryAsset>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -117,6 +124,20 @@ impl GenerateRequest {
             )?,
         })
     }
+}
+
+pub fn validate_reference_total_bytes(total_bytes: u64, maximum_bytes: u64) -> AppResult<()> {
+    if total_bytes <= maximum_bytes {
+        return Ok(());
+    }
+
+    let total_mb = total_bytes as f64 / (1024.0 * 1024.0);
+    let maximum_mb = maximum_bytes as f64 / (1024.0 * 1024.0);
+    Err(AppError::new(
+        ErrorKind::File,
+        format!("Reference images total {total_mb:.1} MB; the maximum is {maximum_mb:.1} MB."),
+        false,
+    ))
 }
 
 fn validate_setting(
@@ -189,6 +210,7 @@ pub struct GenerationJobEvent {
 #[derive(Debug, Clone)]
 pub struct SelectedReference {
     pub path: std::path::PathBuf,
+    pub thumbnail_path: std::path::PathBuf,
     pub mime_type: String,
     pub extension: String,
     pub width: u32,
@@ -216,7 +238,7 @@ mod tests {
         GenerateRequest {
             request_id: "request-id".to_owned(),
             prompt: "A test image".to_owned(),
-            reference_token: None,
+            reference_tokens: Vec::new(),
             aspect_ratio: aspect_ratio.map(ToOwned::to_owned),
             resolution: resolution.map(ToOwned::to_owned),
         }
@@ -239,5 +261,20 @@ mod tests {
             .expect_err("unsupported aspect ratio should fail");
 
         assert_eq!(error.kind, ErrorKind::Validation);
+    }
+
+    #[test]
+    fn rejects_reference_totals_above_the_available_budget() {
+        validate_reference_total_bytes(MAX_REFERENCE_TOTAL_BYTES, MAX_REFERENCE_TOTAL_BYTES)
+            .expect("the exact limit should be accepted");
+
+        let error = validate_reference_total_bytes(
+            MAX_REFERENCE_TOTAL_BYTES + 1,
+            MAX_REFERENCE_TOTAL_BYTES,
+        )
+        .expect_err("a reference total above the limit should fail");
+
+        assert_eq!(error.kind, ErrorKind::File);
+        assert!(error.message.contains("48.0 MB"));
     }
 }

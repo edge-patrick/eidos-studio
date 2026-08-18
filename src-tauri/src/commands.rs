@@ -5,17 +5,26 @@ use uuid::Uuid;
 
 use crate::error::{AppError, ErrorKind};
 use crate::generation;
-use crate::images::{create_history_thumbnail, inspect_raster};
+use crate::images::{create_history_thumbnail, create_reference_thumbnail, inspect_raster};
 use crate::models::{
     AppResult, AppStatus, CancelResult, DeleteHistoryResult, GenerateRequest, HistoryCursor,
     HistoryPage, IMAGE_MODEL_ID, IMAGE_MODEL_NAME, JobAccepted, MAX_REFERENCE_BYTES,
-    ReferenceSelection, SUPPORTED_ASPECT_RATIOS, SUPPORTED_RESOLUTIONS, SaveResult,
-    SelectedReference,
+    MAX_REFERENCE_TOTAL_BYTES, MAX_REFERENCES, ReferenceSelection, SUPPORTED_ASPECT_RATIOS,
+    SUPPORTED_RESOLUTIONS, SaveResult, SelectedReference, validate_reference_total_bytes,
 };
 use crate::state::{AppState, locked};
 
 const DEFAULT_HISTORY_PAGE_SIZE: usize = 60;
 pub const HISTORY_THUMBNAILS_UPDATED_EVENT: &str = "history-thumbnails-updated";
+
+struct ReferenceCandidate {
+    file_name: String,
+    mime_type: String,
+    extension: String,
+    width: u32,
+    height: u32,
+    bytes: Vec<u8>,
+}
 
 #[tauri::command]
 pub fn get_app_status() -> AppResult<AppStatus> {
@@ -25,6 +34,8 @@ pub fn get_app_status() -> AppResult<AppStatus> {
         model_name: IMAGE_MODEL_NAME,
         supported_aspect_ratios: SUPPORTED_ASPECT_RATIOS,
         supported_resolutions: SUPPORTED_RESOLUTIONS,
+        max_references: MAX_REFERENCES,
+        max_reference_total_bytes: MAX_REFERENCE_TOTAL_BYTES,
     })
 }
 
@@ -48,6 +59,8 @@ pub async fn save_api_key(api_key: String, state: State<'_, AppState>) -> AppRes
         model_name: IMAGE_MODEL_NAME,
         supported_aspect_ratios: SUPPORTED_ASPECT_RATIOS,
         supported_resolutions: SUPPORTED_RESOLUTIONS,
+        max_references: MAX_REFERENCES,
+        max_reference_total_bytes: MAX_REFERENCE_TOTAL_BYTES,
     })
 }
 
@@ -58,78 +71,89 @@ pub fn remove_api_key() -> AppResult<()> {
 
 #[tauri::command]
 pub async fn select_reference_image(
+    selected_bytes: u64,
     state: State<'_, AppState>,
-) -> AppResult<Option<ReferenceSelection>> {
+) -> AppResult<Vec<ReferenceSelection>> {
     let selection = rfd::AsyncFileDialog::new()
-        .set_title("Choose a reference image")
+        .set_title("Choose reference images")
         .add_filter("Images", &["png", "jpg", "jpeg", "webp"])
-        .pick_file()
+        .pick_files()
         .await;
 
-    let Some(selection) = selection else {
-        return Ok(None);
+    let Some(selections) = selection else {
+        return Ok(Vec::new());
     };
-
-    let source_path = selection.path().canonicalize().map_err(AppError::file)?;
-    let metadata = tokio::fs::metadata(&source_path)
-        .await
-        .map_err(AppError::file)?;
-    if !metadata.is_file() {
+    if selections.len() > MAX_REFERENCES {
         return Err(AppError::new(
-            ErrorKind::File,
-            "Choose an image file, not a folder.",
-            false,
-        ));
-    }
-    if metadata.len() > MAX_REFERENCE_BYTES {
-        return Err(AppError::new(
-            ErrorKind::File,
-            "Reference images must be smaller than 12 MB.",
+            ErrorKind::Validation,
+            format!("Choose no more than {MAX_REFERENCES} reference images at once."),
             false,
         ));
     }
 
-    let bytes = tokio::fs::read(&source_path)
-        .await
-        .map_err(AppError::file)?;
-    let (mime_type, extension, width, height) = inspect_raster(&bytes)?;
-    let token = Uuid::new_v4().to_string();
-    let managed_path = state
-        .assets
-        .stage_selection(&token, extension, &bytes)
-        .await?;
-    let file_name = source_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("reference")
-        .to_owned();
+    let selected_bytes = selected_bytes.min(MAX_REFERENCE_TOTAL_BYTES);
+    let mut source_paths = Vec::with_capacity(selections.len());
+    let mut total_bytes = 0_u64;
+    for selection in selections {
+        let source_path = selection.path().canonicalize().map_err(AppError::file)?;
+        let metadata = tokio::fs::metadata(&source_path)
+            .await
+            .map_err(AppError::file)?;
+        if !metadata.is_file() {
+            return Err(AppError::new(
+                ErrorKind::File,
+                "Choose image files, not folders.",
+                false,
+            ));
+        }
+        if metadata.len() > MAX_REFERENCE_BYTES {
+            return Err(AppError::new(
+                ErrorKind::File,
+                "Each reference image must be smaller than 12 MB.",
+                false,
+            ));
+        }
 
-    locked(&state.references, "reference")?.insert(
-        token.clone(),
-        SelectedReference {
-            path: managed_path.clone(),
+        total_bytes = total_bytes
+            .checked_add(metadata.len())
+            .ok_or_else(|| AppError::file("Reference image sizes overflowed."))?;
+        source_paths.push(source_path);
+    }
+    let combined_bytes = selected_bytes
+        .checked_add(total_bytes)
+        .ok_or_else(|| AppError::file("Reference image sizes overflowed."))?;
+    validate_reference_total_bytes(combined_bytes, MAX_REFERENCE_TOTAL_BYTES)?;
+
+    let mut candidates = Vec::with_capacity(source_paths.len());
+    for source_path in source_paths {
+        let bytes = tokio::fs::read(&source_path)
+            .await
+            .map_err(AppError::file)?;
+        let (mime_type, extension, width, height) = inspect_raster(&bytes)?;
+        let file_name = source_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("reference")
+            .to_owned();
+
+        candidates.push(ReferenceCandidate {
+            file_name,
             mime_type: mime_type.to_owned(),
             extension: extension.to_owned(),
             width,
             height,
-        },
-    );
+            bytes,
+        });
+    }
 
-    Ok(Some(ReferenceSelection {
-        token,
-        file_name,
-        mime_type: mime_type.to_owned(),
-        width,
-        height,
-        asset_path: managed_path.to_string_lossy().into_owned(),
-    }))
+    stage_reference_candidates(candidates, &state).await
 }
 
 #[tauri::command]
 pub async fn discard_reference(token: String, state: State<'_, AppState>) -> AppResult<()> {
     let reference = locked(&state.references, "reference")?.remove(&token);
     if let Some(reference) = reference {
-        state.assets.discard_selection(&reference.path).await?;
+        discard_selected_reference(&state, &reference).await?;
     }
     Ok(())
 }
@@ -215,11 +239,22 @@ pub async fn list_history(
             thumbnail_backfills.push((
                 output.content_hash.clone(),
                 PathBuf::from(&output.asset_path),
+                false,
             ));
         }
-        for asset in [&mut attempt.output, &mut attempt.reference]
-            .into_iter()
-            .flatten()
+        for reference in &attempt.references {
+            if reference.thumbnail_path.is_none() {
+                thumbnail_backfills.push((
+                    reference.content_hash.clone(),
+                    PathBuf::from(&reference.asset_path),
+                    true,
+                ));
+            }
+        }
+        for asset in attempt
+            .output
+            .iter_mut()
+            .chain(attempt.references.iter_mut())
         {
             let persisted_path = std::path::Path::new(&asset.asset_path);
             asset.asset_path = state
@@ -255,68 +290,165 @@ pub async fn list_history(
 pub async fn restore_history_reference(
     attempt_id: String,
     state: State<'_, AppState>,
-) -> AppResult<Option<ReferenceSelection>> {
+) -> AppResult<Vec<ReferenceSelection>> {
     let reference_attempt_id = attempt_id;
-    let reference = state
+    let saved_references = state
         .database
-        .execute(move |database| database.reference_for_attempt(&reference_attempt_id))
+        .execute(move |database| database.references_for_attempt(&reference_attempt_id))
         .await?;
-    let Some(reference) = reference else {
-        return Ok(None);
-    };
+    let mut saved_sources = Vec::with_capacity(saved_references.len());
+    let mut total_bytes = 0_u64;
+    for (index, reference) in saved_references.into_iter().enumerate() {
+        let persisted_path = std::path::Path::new(&reference.asset_path);
+        let source_path = state.assets.resolve_persisted_path(persisted_path)?;
+        let metadata = tokio::fs::metadata(&source_path)
+            .await
+            .map_err(AppError::file)?;
+        if metadata.len() > MAX_REFERENCE_BYTES {
+            return Err(AppError::new(
+                ErrorKind::File,
+                "A saved reference is too large to reuse.",
+                false,
+            ));
+        }
 
-    let persisted_path = std::path::Path::new(&reference.asset_path);
-    let source_path = state.assets.resolve_persisted_path(persisted_path)?;
-    let metadata = tokio::fs::metadata(&source_path)
-        .await
-        .map_err(AppError::file)?;
-    if metadata.len() > MAX_REFERENCE_BYTES {
-        return Err(AppError::new(
-            ErrorKind::File,
-            "The saved reference is too large to reuse.",
-            false,
+        total_bytes = total_bytes
+            .checked_add(metadata.len())
+            .ok_or_else(|| AppError::file("Reference image sizes overflowed."))?;
+        saved_sources.push((index, reference, source_path));
+    }
+    validate_reference_total_bytes(total_bytes, MAX_REFERENCE_TOTAL_BYTES)?;
+
+    let mut candidates = Vec::with_capacity(saved_sources.len());
+    for (index, reference, source_path) in saved_sources {
+        let bytes = tokio::fs::read(&source_path)
+            .await
+            .map_err(AppError::file)?;
+        let (mime_type, extension, width, height) = inspect_raster(&bytes)?;
+        if mime_type != reference.mime_type
+            || width != reference.width
+            || height != reference.height
+        {
+            return Err(AppError::new(
+                ErrorKind::File,
+                "A saved reference image changed unexpectedly.",
+                false,
+            ));
+        }
+
+        candidates.push(ReferenceCandidate {
+            file_name: format!("Saved reference {}", index + 1),
+            mime_type: mime_type.to_owned(),
+            extension: extension.to_owned(),
+            width,
+            height,
+            bytes,
+        });
+    }
+
+    stage_reference_candidates(candidates, &state).await
+}
+
+async fn stage_reference_candidates(
+    candidates: Vec<ReferenceCandidate>,
+    state: &AppState,
+) -> AppResult<Vec<ReferenceSelection>> {
+    let mut staged = Vec::with_capacity(candidates.len());
+    for candidate in candidates {
+        let thumbnail_bytes = match create_reference_thumbnail(&candidate.bytes) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                discard_staged_references(state, &staged).await;
+                return Err(error);
+            }
+        };
+        let token = Uuid::new_v4().to_string();
+        let managed_path = match state
+            .assets
+            .stage_selection(&token, &candidate.extension, &candidate.bytes)
+            .await
+        {
+            Ok(path) => path,
+            Err(error) => {
+                discard_staged_references(state, &staged).await;
+                return Err(error);
+            }
+        };
+        let thumbnail_path = match state
+            .assets
+            .stage_selection_thumbnail(&token, &thumbnail_bytes)
+            .await
+        {
+            Ok(path) => path,
+            Err(error) => {
+                let _ = state.assets.discard_selection(&managed_path).await;
+                discard_staged_references(state, &staged).await;
+                return Err(error);
+            }
+        };
+        staged.push((
+            ReferenceSelection {
+                token: token.clone(),
+                file_name: candidate.file_name,
+                mime_type: candidate.mime_type.clone(),
+                width: candidate.width,
+                height: candidate.height,
+                size_bytes: u64::try_from(candidate.bytes.len()).map_err(AppError::internal)?,
+                asset_path: managed_path.to_string_lossy().into_owned(),
+                thumbnail_path: thumbnail_path.to_string_lossy().into_owned(),
+            },
+            SelectedReference {
+                path: managed_path,
+                thumbnail_path,
+                mime_type: candidate.mime_type,
+                extension: candidate.extension,
+                width: candidate.width,
+                height: candidate.height,
+            },
         ));
     }
 
-    let bytes = tokio::fs::read(&source_path)
-        .await
-        .map_err(AppError::file)?;
-    let (mime_type, extension, width, height) = inspect_raster(&bytes)?;
-    if mime_type != reference.mime_type || width != reference.width || height != reference.height {
-        return Err(AppError::new(
-            ErrorKind::File,
-            "The saved reference image changed unexpectedly.",
-            false,
-        ));
-    }
-
-    let token = Uuid::new_v4().to_string();
-    let managed_path = state
-        .assets
-        .stage_selection(&token, extension, &bytes)
-        .await?;
-    let selected = SelectedReference {
-        path: managed_path.clone(),
-        mime_type: mime_type.to_owned(),
-        extension: extension.to_owned(),
-        width,
-        height,
-    };
-    if let Err(error) = locked(&state.references, "reference").map(|mut references| {
-        references.insert(token.clone(), selected);
-    }) {
-        let _ = state.assets.discard_selection(&managed_path).await;
+    if let Err(error) = register_staged_references(state, &staged) {
+        discard_staged_references(state, &staged).await;
         return Err(error);
     }
+    Ok(staged.into_iter().map(|(selection, _)| selection).collect())
+}
 
-    Ok(Some(ReferenceSelection {
-        token,
-        file_name: "Saved reference".to_owned(),
-        mime_type: mime_type.to_owned(),
-        width,
-        height,
-        asset_path: managed_path.to_string_lossy().into_owned(),
-    }))
+fn register_staged_references(
+    state: &AppState,
+    staged: &[(ReferenceSelection, SelectedReference)],
+) -> AppResult<()> {
+    let mut references = locked(&state.references, "reference")?;
+    for (selection, reference) in staged {
+        references.insert(selection.token.clone(), reference.clone());
+    }
+    Ok(())
+}
+
+async fn discard_staged_references(
+    state: &AppState,
+    staged: &[(ReferenceSelection, SelectedReference)],
+) {
+    for (_, reference) in staged {
+        let _ = discard_selected_reference(state, reference).await;
+    }
+}
+
+async fn discard_selected_reference(
+    state: &AppState,
+    reference: &SelectedReference,
+) -> AppResult<()> {
+    let asset_error = state.assets.discard_selection(&reference.path).await.err();
+    let thumbnail_error = state
+        .assets
+        .discard_selection(&reference.thumbnail_path)
+        .await
+        .err();
+    match asset_error.or(thumbnail_error) {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 
 #[tauri::command]
@@ -341,34 +473,45 @@ pub async fn delete_history_attempt(
 }
 
 fn spawn_thumbnail_backfill(
-    jobs: Vec<(String, PathBuf)>,
+    jobs: Vec<(String, PathBuf, bool)>,
     database: crate::db::DatabaseHandle,
     assets: crate::asset_store::AssetStore,
     app: AppHandle,
 ) {
     tauri::async_runtime::spawn(async move {
         let mut updated = false;
-        for (content_hash, stored_path) in jobs {
+        for (content_hash, stored_path, reference_preview) in jobs {
             let Ok(source) = assets.resolve_persisted_path(&stored_path) else {
                 continue;
             };
             let Ok(bytes) = tokio::fs::read(source).await else {
                 continue;
             };
-            let Ok(thumbnail_bytes) = create_history_thumbnail(&bytes) else {
+            let thumbnail = if reference_preview {
+                create_reference_thumbnail(&bytes)
+            } else {
+                create_history_thumbnail(&bytes)
+            };
+            let Ok(thumbnail_bytes) = thumbnail else {
                 continue;
             };
-            let Ok(thumbnail_path) = assets
-                .store_thumbnail(&content_hash, &thumbnail_bytes)
-                .await
-            else {
+            let stored_thumbnail = if reference_preview {
+                assets
+                    .store_reference_thumbnail(&content_hash, &thumbnail_bytes)
+                    .await
+            } else {
+                assets
+                    .store_thumbnail(&content_hash, &thumbnail_bytes)
+                    .await
+            };
+            let Ok(thumbnail_path) = stored_thumbnail else {
                 continue;
             };
             let database_hash = content_hash.clone();
             let database_path = thumbnail_path.clone();
             let asset_exists = database
                 .execute(move |database| {
-                    database.set_asset_thumbnail(&database_hash, &database_path)
+                    database.set_asset_thumbnail(&database_hash, &database_path, reference_preview)
                 })
                 .await
                 .unwrap_or(false);

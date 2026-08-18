@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -8,11 +10,12 @@ use uuid::Uuid;
 
 use crate::db::NewAsset;
 use crate::error::{AppError, ErrorKind};
-use crate::images::{create_history_thumbnail, inspect_raster};
+use crate::images::{create_history_thumbnail, create_reference_thumbnail, inspect_raster};
 use crate::models::{
     AppResult, CancelResult, GenerateRequest, GenerationJobEvent, GenerationJobStatus,
     GenerationResult, GenerationSettings, IMAGE_MODEL_ID, JobAccepted, MAX_PROMPT_CHARS,
-    MAX_REFERENCE_BYTES,
+    MAX_REFERENCE_BYTES, MAX_REFERENCE_TOTAL_BYTES, MAX_REFERENCES, SelectedReference,
+    validate_reference_total_bytes,
 };
 use crate::state::{AppState, locked};
 
@@ -24,11 +27,22 @@ struct PreparedReference {
     bytes: Vec<u8>,
 }
 
+struct DatabaseReference {
+    asset_id: String,
+    content_hash: String,
+    storage_key: PathBuf,
+    thumbnail_storage_key: Option<PathBuf>,
+    mime_type: String,
+    width: u32,
+    height: u32,
+    sort_order: i64,
+}
+
 struct GenerationTask {
     request_id: String,
     prompt: String,
     settings: GenerationSettings,
-    reference: Option<PreparedReference>,
+    references: Vec<PreparedReference>,
     api_key: String,
     _permit: OwnedSemaphorePermit,
 }
@@ -47,33 +61,140 @@ pub async fn start(
     let api_key = crate::credentials::get_api_key()?;
     let permit = acquire_generation_slot(state.generation_slots.clone())?;
 
-    let selected_reference = match request.reference_token.as_deref() {
-        Some(token) => Some(
-            locked(&state.references, "reference")?
-                .get(token)
-                .cloned()
-                .ok_or_else(|| {
+    if request.reference_tokens.len() > MAX_REFERENCES {
+        return Err(AppError::new(
+            ErrorKind::Validation,
+            format!("Choose no more than {MAX_REFERENCES} reference images."),
+            false,
+        ));
+    }
+    let unique_tokens = request.reference_tokens.iter().collect::<HashSet<_>>();
+    if unique_tokens.len() != request.reference_tokens.len() {
+        return Err(AppError::new(
+            ErrorKind::Validation,
+            "Each reference image can only be included once.",
+            false,
+        ));
+    }
+    let selected_references = {
+        let references = locked(&state.references, "reference")?;
+        request
+            .reference_tokens
+            .iter()
+            .map(|token| {
+                references.get(token).cloned().ok_or_else(|| {
                     AppError::new(
                         ErrorKind::Validation,
-                        "Choose the reference image again before generating.",
+                        "Choose the reference images again before generating.",
                         false,
                     )
-                })?,
-        ),
-        None => None,
+                })
+            })
+            .collect::<AppResult<Vec<_>>>()?
     };
 
-    let prepared_reference = if let Some(reference) = selected_reference {
+    let cancellation = CancellationToken::new();
+    {
+        let mut jobs = locked(&state.jobs, "generation job")?;
+        if jobs.contains_key(&request_id) {
+            return Err(AppError::new(
+                ErrorKind::Validation,
+                "That generation request is already running.",
+                false,
+            ));
+        }
+        jobs.insert(request_id.clone(), cancellation.clone());
+    }
+
+    let (prepared_references, database_references) =
+        match prepare_references(selected_references, &cancellation, state).await {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                remove_job(&request_id, state);
+                return Err(error);
+            }
+        };
+
+    if cancellation.is_cancelled() {
+        remove_job(&request_id, state);
+        return Err(cancelled_error());
+    }
+
+    let database_request_id = request_id.clone();
+    let database_prompt = prompt.clone();
+    let database_result = state
+        .database
+        .execute(move |database| {
+            let references = database_references
+                .iter()
+                .map(|reference| NewAsset {
+                    id: &reference.asset_id,
+                    content_hash: &reference.content_hash,
+                    role: "reference",
+                    local_path: &reference.storage_key,
+                    thumbnail_path: reference.thumbnail_storage_key.as_deref(),
+                    mime_type: &reference.mime_type,
+                    width: reference.width,
+                    height: reference.height,
+                    sort_order: reference.sort_order,
+                })
+                .collect::<Vec<_>>();
+            database.start_attempt(
+                &database_request_id,
+                &database_prompt,
+                IMAGE_MODEL_ID,
+                i64::try_from(references.len()).map_err(AppError::internal)?,
+                &settings_json,
+                references,
+            )
+        })
+        .await;
+    if let Err(error) = database_result {
+        remove_job(&request_id, state);
+        return Err(error);
+    }
+
+    let task = GenerationTask {
+        request_id: request_id.clone(),
+        prompt,
+        settings,
+        references: prepared_references,
+        api_key,
+        _permit: permit,
+    };
+    tauri::async_runtime::spawn(run(task, cancellation, app));
+
+    Ok(JobAccepted { request_id })
+}
+
+async fn prepare_references(
+    selected_references: Vec<SelectedReference>,
+    cancellation: &CancellationToken,
+    state: &AppState,
+) -> AppResult<(Vec<PreparedReference>, Vec<DatabaseReference>)> {
+    let mut prepared_references = Vec::with_capacity(selected_references.len());
+    let mut database_references = Vec::with_capacity(selected_references.len());
+    let mut total_bytes = 0_u64;
+
+    for (index, reference) in selected_references.into_iter().enumerate() {
+        if cancellation.is_cancelled() {
+            return Err(cancelled_error());
+        }
+
         let bytes = tokio::fs::read(&reference.path)
             .await
             .map_err(AppError::file)?;
         if bytes.len() as u64 > MAX_REFERENCE_BYTES {
             return Err(AppError::new(
                 ErrorKind::File,
-                "The selected reference image is now larger than 12 MB.",
+                "A selected reference image is now larger than 12 MB.",
                 false,
             ));
         }
+        total_bytes = total_bytes
+            .checked_add(u64::try_from(bytes.len()).map_err(AppError::internal)?)
+            .ok_or_else(|| AppError::file("Reference image sizes overflowed."))?;
+        validate_reference_total_bytes(total_bytes, MAX_REFERENCE_TOTAL_BYTES)?;
 
         let (mime_type, extension, width, height) = inspect_raster(&bytes)?;
         if mime_type != reference.mime_type
@@ -83,80 +204,44 @@ pub async fn start(
         {
             return Err(AppError::new(
                 ErrorKind::File,
-                "The managed reference image changed unexpectedly. Choose it again.",
+                "A managed reference image changed unexpectedly. Choose it again.",
                 false,
             ));
         }
 
+        if cancellation.is_cancelled() {
+            return Err(cancelled_error());
+        }
         let stored = state.assets.store(extension, &bytes).await?;
-        let asset_id = Uuid::new_v4().to_string();
-        let database_request_id = request_id.clone();
-        let database_prompt = prompt.clone();
-        let database_settings = settings_json.clone();
-        let content_hash = stored.content_hash;
-        let storage_key = stored.storage_key;
-        let database_mime_type = mime_type.to_owned();
-        state
-            .database
-            .execute(move |database| {
-                database.start_attempt(
-                    &database_request_id,
-                    &database_prompt,
-                    IMAGE_MODEL_ID,
-                    1,
-                    &database_settings,
-                    Some(NewAsset {
-                        id: &asset_id,
-                        content_hash: &content_hash,
-                        role: "reference",
-                        local_path: &storage_key,
-                        thumbnail_path: None,
-                        mime_type: &database_mime_type,
-                        width,
-                        height,
-                        sort_order: 0,
-                    }),
-                )
-            })
-            .await?;
-
-        Some(PreparedReference {
+        let thumbnail_bytes = match tokio::fs::read(&reference.thumbnail_path).await {
+            Ok(thumbnail) => Some(thumbnail),
+            Err(_) => create_reference_thumbnail(&bytes).ok(),
+        };
+        let thumbnail_storage_key = match thumbnail_bytes {
+            Some(thumbnail) => state
+                .assets
+                .store_reference_thumbnail(&stored.content_hash, &thumbnail)
+                .await
+                .ok(),
+            None => None,
+        };
+        database_references.push(DatabaseReference {
+            asset_id: Uuid::new_v4().to_string(),
+            content_hash: stored.content_hash,
+            storage_key: stored.storage_key,
+            thumbnail_storage_key,
+            mime_type: mime_type.to_owned(),
+            width,
+            height,
+            sort_order: i64::try_from(index).map_err(AppError::internal)?,
+        });
+        prepared_references.push(PreparedReference {
             mime_type: mime_type.to_owned(),
             bytes,
-        })
-    } else {
-        let database_request_id = request_id.clone();
-        let database_prompt = prompt.clone();
-        state
-            .database
-            .execute(move |database| {
-                database.start_attempt(
-                    &database_request_id,
-                    &database_prompt,
-                    IMAGE_MODEL_ID,
-                    0,
-                    &settings_json,
-                    None,
-                )
-            })
-            .await?;
-        None
-    };
+        });
+    }
 
-    let cancellation = CancellationToken::new();
-    locked(&state.jobs, "generation job")?.insert(request_id.clone(), cancellation.clone());
-
-    let task = GenerationTask {
-        request_id: request_id.clone(),
-        prompt,
-        settings,
-        reference: prepared_reference,
-        api_key,
-        _permit: permit,
-    };
-    tauri::async_runtime::spawn(run(task, cancellation, app));
-
-    Ok(JobAccepted { request_id })
+    Ok((prepared_references, database_references))
 }
 
 pub fn cancel(request_id: String, state: &AppState) -> AppResult<CancelResult> {
@@ -249,10 +334,14 @@ async fn run(task: GenerationTask, cancellation: CancellationToken, app: AppHand
         Err(error) => failed_event(&task.request_id, duration_ms, error, &state).await,
     };
 
-    if let Ok(mut jobs) = state.jobs.lock() {
-        jobs.remove(&task.request_id);
-    }
+    remove_job(&task.request_id, &state);
     let _ = app.emit(GENERATION_JOB_EVENT, event);
+}
+
+fn remove_job(request_id: &str, state: &AppState) {
+    if let Ok(mut jobs) = state.jobs.lock() {
+        jobs.remove(request_id);
+    }
 }
 
 async fn generate_and_store(
@@ -268,17 +357,18 @@ async fn generate_and_store(
         return Err(cancelled_error());
     }
 
-    let reference = task
-        .reference
-        .as_ref()
-        .map(|reference| (reference.mime_type.as_str(), reference.bytes.as_slice()));
+    let references = task
+        .references
+        .iter()
+        .map(|reference| (reference.mime_type.as_str(), reference.bytes.as_slice()))
+        .collect::<Vec<_>>();
     let image = state
         .openrouter
         .generate_image(
             &task.api_key,
             &task.prompt,
             &task.settings,
-            reference,
+            &references,
             cancellation,
         )
         .await?;

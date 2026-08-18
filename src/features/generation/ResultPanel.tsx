@@ -131,7 +131,7 @@ function EmptyState() {
       </div>
       <p className="eyebrow">Ready for exposure</p>
       <h2>Your image appears here.</h2>
-      <p>Write a prompt, add a reference if useful, then generate.</p>
+      <p>Write a prompt, add references if useful, then generate.</p>
     </div>
   );
 }
