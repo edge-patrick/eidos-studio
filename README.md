@@ -25,7 +25,7 @@ image generation alone.
 | Billing | ✅ Pay only when you generate | ❌ Pay about $20 every month |
 | 50 images | ✅ About $3.35 | ❌ About $20 for the plan |
 | Output controls | ✅ Choose aspect ratio, 1K, 2K, or 4K | ❌ Fewer explicit controls |
-| Model choice | ✅ Choose among three Gemini image tiers | ❌ Gemini only |
+| Model choice | ✅ Choose across Google and OpenAI models | ❌ Gemini only |
 | Cost visibility | ✅ See the exact cost of every image | ❌ No per-image dollar cost |
 | Storage | ✅ Keep your library locally on your Mac | ❌ Tied to your Google account |
 | Source code | ✅ Free and open source | ❌ Closed source |
@@ -37,6 +37,7 @@ image generation alone.
 - `google/gemini-3.1-flash-lite-image` — Nano Banana 2 Lite (1K)
 - `google/gemini-3.1-flash-image` — Nano Banana 2 (1K, 2K, or 4K)
 - `google/gemini-3-pro-image` — Nano Banana Pro (1K, 2K, or 4K)
+- `openai/gpt-image-2` — GPT Image 2 (capability-aware sizing and references)
 
 ## What it can do
 
@@ -64,7 +65,7 @@ Version 0.3.1 adds up to 14 ordered reference images per generation, with reorde
 - [x] Polished interface and refreshed branding
 - [x] A full history and image library
 - [x] Multiple reference images
-- [x] Multiple Gemini models with capability-aware settings
+- [x] Multiple Google and OpenAI models with capability-aware settings
 - [ ] More image models and settings
 - [ ] Side-by-side model comparison
 - [ ] More ways to save and share generated images

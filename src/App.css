@@ -746,12 +746,24 @@ svg {
   background: transparent;
 }
 
-.banana-icon img {
+.model-icon img {
   display: block;
   width: 30px;
   height: 30px;
   object-fit: contain;
   pointer-events: none;
+}
+
+.model-icon-placeholder {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  color: var(--text-soft);
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 14px;
 }
 
 .model-copy {
@@ -839,8 +851,6 @@ svg {
   height: 31px;
 }
 
-.model-option .banana-icon img { width: 30px; height: 30px; }
-
 .model-check {
   margin-right: 4px;
   color: #c99cff;
@@ -867,7 +877,8 @@ svg {
   line-height: 1.4;
 }
 
-.reference-support-note {
+.reference-support-note,
+.resolution-support-note {
   margin: 0;
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -877,6 +888,8 @@ svg {
   font-size: 9px;
   line-height: 1.4;
 }
+
+.resolution-support-note { text-align: center; }
 
 .reference-list {
   display: grid;

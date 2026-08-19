@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import gptImage from "../../assets/gpt-image.png";
 import nanoBananaLite from "../../assets/nano-banana-lite.png";
 import nanoBananaPro from "../../assets/nano-banana-pro.png";
 import nanoBananaRegular from "../../assets/nano-banana-regular.png";
@@ -17,6 +18,7 @@ interface ComposerPanelProps {
 }
 
 const modelIcons: Record<string, string> = {
+  "openai/gpt-image-2": gptImage,
   "google/gemini-3.1-flash-lite-image": nanoBananaLite,
   "google/gemini-3.1-flash-image": nanoBananaRegular,
   "google/gemini-3-pro-image": nanoBananaPro,
@@ -319,15 +321,21 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
             onChange={studio.setAspectRatio}
             disabled={studio.busy}
           />
-          <OptionStrip
-            id="resolution"
-            className="resolution-options"
-            label="Resolution"
-            options={studio.resolutionOptions}
-            value={studio.resolution}
-            onChange={studio.setResolution}
-            disabled={studio.busy}
-          />
+          {studio.selectedModel.supportedResolutions.length > 0 ? (
+            <OptionStrip
+              id="resolution"
+              className="resolution-options"
+              label="Resolution"
+              options={studio.resolutionOptions}
+              value={studio.resolution}
+              onChange={studio.setResolution}
+              disabled={studio.busy}
+            />
+          ) : (
+            <p className="resolution-support-note" role="status">
+              {studio.selectedModel.name} uses the provider&apos;s default output size.
+            </p>
+          )}
         </div>
       </div>
 
@@ -335,8 +343,10 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
         <div className="generation-summary">
           <span>Output</span>
           <strong>
-            1 image · {formatOption(studio.aspectRatio)} ·{" "}
-            {formatOption(studio.resolution)}
+            1 image · {formatOption(studio.aspectRatio)}
+            {studio.selectedModel.supportedResolutions.length > 0 && (
+              <> · {formatOption(studio.resolution)}</>
+            )}
           </strong>
         </div>
         <button
@@ -395,10 +405,14 @@ function ReferenceThumbnail({
 }
 
 function ModelIcon({ modelId }: { modelId: string }) {
-  const icon = modelIcons[modelId] ?? nanoBananaRegular;
+  const icon = modelIcons[modelId];
   return (
-    <span className="model-icon banana-icon" aria-hidden="true">
-      <img src={icon} alt="" draggable={false} />
+    <span className="model-icon" aria-hidden="true">
+      {icon ? (
+        <img src={icon} alt="" draggable={false} />
+      ) : (
+        <span className="model-icon-placeholder">◇</span>
+      )}
     </span>
   );
 }

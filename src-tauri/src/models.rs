@@ -6,6 +6,7 @@ pub const IMAGE_MODEL_ID: &str = "google/gemini-3.1-flash-image";
 pub const IMAGE_MODEL_NAME: &str = "Nano Banana 2";
 pub const IMAGE_MODEL_LITE_ID: &str = "google/gemini-3.1-flash-lite-image";
 pub const IMAGE_MODEL_PRO_ID: &str = "google/gemini-3-pro-image";
+pub const GPT_IMAGE_2_ID: &str = "openai/gpt-image-2";
 pub const MAX_PROMPT_CHARS: usize = 8_000;
 pub const MAX_REFERENCE_BYTES: u64 = 12 * 1024 * 1024;
 pub const MAX_REFERENCE_TOTAL_BYTES: u64 = 48 * 1024 * 1024;
@@ -65,6 +66,19 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             unavailable_reason: None,
             supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
             supported_resolutions: owned_values(SUPPORTED_RESOLUTIONS),
+            max_references: MAX_REFERENCES,
+        },
+        ImageModel {
+            id: GPT_IMAGE_2_ID.to_owned(),
+            name: "GPT Image 2".to_owned(),
+            provider: "OpenAI".to_owned(),
+            description: "Fast, high-quality generation and editing with high-fidelity references."
+                .to_owned(),
+            available: true,
+            is_default: false,
+            unavailable_reason: None,
+            supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
+            supported_resolutions: Vec::new(),
             max_references: MAX_REFERENCES,
         },
     ]
@@ -353,6 +367,22 @@ mod tests {
             .expect_err("lite must remain 1K-only");
 
         assert_eq!(error.kind, ErrorKind::Validation);
+    }
+
+    #[test]
+    fn includes_gpt_image_as_a_non_default_openai_model() {
+        let models = fallback_image_models();
+        let model = models
+            .iter()
+            .find(|model| model.id == GPT_IMAGE_2_ID)
+            .expect("GPT Image 2 model");
+
+        assert_eq!(model.name, "GPT Image 2");
+        assert_eq!(model.provider, "OpenAI");
+        assert!(!model.is_default);
+        assert!(model.supported_resolutions.is_empty());
+        assert_eq!(model.max_references, MAX_REFERENCES);
+        assert_eq!(models.iter().filter(|model| model.is_default).count(), 1);
     }
 
     #[test]

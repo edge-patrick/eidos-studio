@@ -466,6 +466,8 @@ fn parse_api_error(status: StatusCode, bytes: &[u8]) -> AppError {
         &value,
         &["finish_reason", "block_reason", "error_type", "code"],
     );
+    let flagged_input = find_string(&value, &["flagged_input"]);
+    let moderation_reasons = find_string_values(&value, "reasons");
     let upstream_message = find_string(&value, &["message"]);
 
     let mut details = vec![format!("HTTP {}", status.as_u16())];
@@ -475,6 +477,9 @@ fn parse_api_error(status: StatusCode, bytes: &[u8]) -> AppError {
     if let Some(reason) = reason.as_deref() {
         details.push(format!("Reason: {reason}"));
     }
+    if !moderation_reasons.is_empty() {
+        details.push(format!("Flagged: {}", moderation_reasons.join(", ")));
+    }
 
     let reason_upper = reason.as_deref().unwrap_or_default().to_ascii_uppercase();
     let message_lower = upstream_message
@@ -482,7 +487,7 @@ fn parse_api_error(status: StatusCode, bytes: &[u8]) -> AppError {
         .unwrap_or_default()
         .to_ascii_lowercase();
 
-    let error = if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+    let error = if status == StatusCode::UNAUTHORIZED {
         AppError::new(
             ErrorKind::Authentication,
             "OpenRouter rejected this API key.",
@@ -503,16 +508,46 @@ fn parse_api_error(status: StatusCode, bytes: &[u8]) -> AppError {
             "The provider blocked the generated image candidate. Retrying may produce a different result.",
             true,
         )
+    // A provider's raw error may surface this string code. Without a captured moderation stage,
+    // input and output blocks cannot be distinguished here.
+    } else if reason_upper == "MODERATION_BLOCKED" {
+        AppError::new(
+            ErrorKind::PromptBlocked,
+            "The provider declined the prompt or reference images before generation.",
+            false,
+        )
+    } else if message_lower.contains("rejected by the safety system") {
+        AppError::new(
+            ErrorKind::PromptBlocked,
+            "The provider's safety system rejected this prompt.",
+            false,
+        )
     } else if reason_upper.contains("PROMPT") && reason_upper.contains("BLOCK") {
         AppError::new(
             ErrorKind::PromptBlocked,
             "The provider declined the prompt before generating an image.",
             false,
         )
-    } else if reason_upper.contains("SAFETY") || reason_upper.contains("RECITATION") {
+    } else if reason_upper == "CONTENT_POLICY_VIOLATION"
+        || reason_upper == "REFUSAL"
+        || reason_upper.contains("SAFETY")
+        || reason_upper.contains("RECITATION")
+    {
         AppError::new(
             ErrorKind::ProviderSafetyRefusal,
             "The provider declined this generation request.",
+            false,
+        )
+    } else if flagged_input.is_some() || !moderation_reasons.is_empty() {
+        AppError::new(
+            ErrorKind::PromptBlocked,
+            "OpenRouter's moderation flagged this prompt or its reference images.",
+            false,
+        )
+    } else if status == StatusCode::FORBIDDEN {
+        AppError::new(
+            ErrorKind::Authentication,
+            "OpenRouter denied this request. Check the API key's permissions and guardrail settings.",
             false,
         )
     } else if status == StatusCode::BAD_REQUEST {
@@ -561,6 +596,32 @@ fn find_string(value: &Value, keys: &[&str]) -> Option<String> {
                 .and_then(|value| find_string(&value, keys))
         }
         _ => None,
+    }
+}
+
+fn find_string_values(value: &Value, key: &str) -> Vec<String> {
+    match value {
+        Value::Object(map) => {
+            if let Some(Value::Array(values)) = map.get(key) {
+                let collected = values
+                    .iter()
+                    .filter_map(|value| value.as_str().map(ToOwned::to_owned))
+                    .collect::<Vec<_>>();
+                if !collected.is_empty() {
+                    return collected;
+                }
+            }
+            map.values()
+                .map(|value| find_string_values(value, key))
+                .find(|values| !values.is_empty())
+                .unwrap_or_default()
+        }
+        Value::Array(values) => values
+            .iter()
+            .map(|value| find_string_values(value, key))
+            .find(|values| !values.is_empty())
+            .unwrap_or_default(),
+        _ => Vec::new(),
     }
 }
 
@@ -695,6 +756,105 @@ mod tests {
     }
 
     #[test]
+    fn identifies_string_moderation_block_codes_as_prompt_blocks() {
+        let body = br#"{
+            "error": {
+                "code": "moderation_blocked"
+            }
+        }"#;
+        let error = parse_api_error(StatusCode::BAD_REQUEST, body);
+
+        assert_eq!(error.kind, ErrorKind::PromptBlocked);
+        assert!(!error.retryable);
+        assert!(
+            error
+                .details
+                .as_deref()
+                .is_some_and(|details| details.contains("Reason: moderation_blocked"))
+        );
+    }
+
+    #[test]
+    fn identifies_observed_gpt_image_safety_refusals() {
+        let body = br#"{
+            "error": {
+                "message": "Your request was rejected by the safety system. If you believe this is an error, contact us at help.openai.com and include the request ID req_ce759ec13e9f4e1fb9d2e229314b71c6.",
+                "code": 400,
+                "metadata": {"provider_name": "OpenAI"}
+            }
+        }"#;
+        let error = parse_api_error(StatusCode::BAD_REQUEST, body);
+
+        assert_eq!(error.kind, ErrorKind::PromptBlocked);
+        assert!(!error.retryable);
+        assert!(
+            error
+                .details
+                .as_deref()
+                .is_some_and(|details| details.contains("Provider: OpenAI"))
+        );
+    }
+
+    #[test]
+    fn identifies_openrouter_content_policy_error_types() {
+        let body = br#"{
+            "error": {
+                "message": "The request was refused.",
+                "code": 400,
+                "metadata": {
+                    "provider_name": "OpenAI",
+                    "error_type": "content_policy_violation"
+                }
+            }
+        }"#;
+        let error = parse_api_error(StatusCode::BAD_REQUEST, body);
+
+        assert_eq!(error.kind, ErrorKind::ProviderSafetyRefusal);
+        assert!(!error.retryable);
+    }
+
+    #[test]
+    fn identifies_openrouter_moderation_flags() {
+        let body = br#"{
+            "error": {
+                "code": 403,
+                "message": "Your input was flagged.",
+                "metadata": {
+                    "reasons": ["sexual"],
+                    "flagged_input": "a prompt fragment",
+                    "provider_name": "OpenAI",
+                    "model_slug": "openai/gpt-image-2"
+                }
+            }
+        }"#;
+        let error = parse_api_error(StatusCode::FORBIDDEN, body);
+
+        assert_eq!(error.kind, ErrorKind::PromptBlocked);
+        assert!(!error.retryable);
+        assert!(
+            error
+                .details
+                .as_deref()
+                .is_some_and(|details| details.contains("Flagged: sexual"))
+        );
+    }
+
+    #[test]
+    fn keeps_unrecognized_forbidden_errors_as_non_retryable_access_failures() {
+        let body = br#"{
+            "error": {
+                "message": "Forbidden",
+                "code": 403
+            }
+        }"#;
+        let error = parse_api_error(StatusCode::FORBIDDEN, body);
+
+        assert_eq!(error.kind, ErrorKind::Authentication);
+        assert!(!error.retryable);
+        assert!(error.message.contains("denied this request"));
+    }
+
+    #[test]
     fn parses_data_urls() {
         let (mime_type, encoded) = split_data_url("data:image/png;base64,abcd");
         assert_eq!(mime_type.as_deref(), Some("image/png"));
@@ -721,7 +881,8 @@ mod tests {
         let body = r#"{"data":[
             {"id":"google/gemini-3.1-flash-lite-image","supported_parameters":{"resolution":{"type":"enum","values":["1K"]},"aspect_ratio":{"type":"enum","values":["1:1","16:9"]},"input_references":{"type":"range","min":0,"max":10}}},
             {"id":"google/gemini-3.1-flash-image","supported_parameters":{"resolution":{"type":"enum","values":["1K","2K","4K"]},"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"input_references":{"type":"range","min":0,"max":14}}},
-            {"id":"google/gemini-3-pro-image","supported_parameters":{"resolution":{"type":"enum","values":["1K","2K","4K"]},"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"input_references":{"type":"range","min":0,"max":14}}}
+            {"id":"google/gemini-3-pro-image","supported_parameters":{"resolution":{"type":"enum","values":["1K","2K","4K"]},"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"input_references":{"type":"range","min":0,"max":14}}},
+            {"id":"openai/gpt-image-2","supported_parameters":{"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"input_references":{"type":"range","min":0,"max":16}}}
         ]}"#;
         let (base_url, request) = mock_server("200 OK", body);
         let client = OpenRouterClient::new(Client::new(), base_url);
@@ -731,10 +892,12 @@ mod tests {
             .await
             .expect("catalog");
 
-        assert_eq!(models.len(), 3);
+        assert_eq!(models.len(), 4);
         assert!(models.iter().all(|model| model.available));
         assert_eq!(models[0].supported_aspect_ratios, ["1:1", "16:9"]);
         assert_eq!(models[0].max_references, 10);
+        assert!(models[3].supported_resolutions.is_empty());
+        assert_eq!(models[3].max_references, crate::models::MAX_REFERENCES);
         let request = request.join().expect("mock request");
         assert!(request.starts_with("GET /images/models HTTP/1.1"));
     }
@@ -752,7 +915,7 @@ mod tests {
             .await
             .expect("catalog");
 
-        assert_eq!(models.len(), 3);
+        assert_eq!(models.len(), 4);
         assert!(!models[0].available);
         assert_eq!(
             models[0].unavailable_reason.as_deref(),
@@ -763,6 +926,7 @@ mod tests {
         assert_eq!(models[1].supported_resolutions, ["1K", "2K", "4K"]);
         assert_eq!(models[1].max_references, 14);
         assert!(!models[2].available);
+        assert!(!models[3].available);
         request.join().expect("mock request");
     }
 
@@ -771,7 +935,8 @@ mod tests {
         let body = r#"{"data":[
             {"id":"google/gemini-3.1-flash-lite-image","supported_parameters":{"resolution":{"type":"enum","values":["1K"]},"aspect_ratio":{"type":"enum","values":["1:1"]},"input_references":{"type":"range","min":0,"max":14}}},
             {"id":"google/gemini-3.1-flash-image","supported_parameters":{}},
-            {"id":"google/gemini-3-pro-image","supported_parameters":{"resolution":{"type":"enum","values":["1K","2K","4K"]},"aspect_ratio":{"type":"enum","values":["1:1"]},"input_references":{"type":"range","min":0,"max":14}}}
+            {"id":"google/gemini-3-pro-image","supported_parameters":{"resolution":{"type":"enum","values":["1K","2K","4K"]},"aspect_ratio":{"type":"enum","values":["1:1"]},"input_references":{"type":"range","min":0,"max":14}}},
+            {"id":"openai/gpt-image-2","supported_parameters":{}}
         ]}"#;
         let (base_url, request) = mock_server("200 OK", body);
         let client = OpenRouterClient::new(Client::new(), base_url);
@@ -785,6 +950,10 @@ mod tests {
         assert!(models[1].supported_aspect_ratios.is_empty());
         assert!(models[1].supported_resolutions.is_empty());
         assert_eq!(models[1].max_references, 0);
+        assert!(models[3].available);
+        assert!(models[3].supported_aspect_ratios.is_empty());
+        assert!(models[3].supported_resolutions.is_empty());
+        assert_eq!(models[3].max_references, 0);
         request.join().expect("mock request");
     }
 

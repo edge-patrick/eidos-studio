@@ -92,6 +92,18 @@ const imageModels: ImageModel[] = [
     supportedResolutions: ["1K", "2K", "4K"],
     maxReferences: 14,
   },
+  {
+    id: "openai/gpt-image-2",
+    name: "GPT Image 2",
+    provider: "OpenAI",
+    description:
+      "Fast, high-quality generation and editing with high-fidelity references.",
+    available: true,
+    isDefault: false,
+    supportedAspectRatios: ["1:1", "2:3", "3:2", "16:9"],
+    supportedResolutions: [],
+    maxReferences: 14,
+  },
 ];
 
 describe("App", () => {
@@ -230,7 +242,7 @@ describe("App", () => {
     );
   });
 
-  it("selects among the three available Gemini models", async () => {
+  it("selects models across providers and uses their picker icons", async () => {
     invokeMock
       .mockResolvedValueOnce(appStatus)
       .mockResolvedValueOnce(imageModels);
@@ -245,6 +257,14 @@ describe("App", () => {
     ).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("option", { name: /Nano Banana 2 Lite/ })).toBeEnabled();
     expect(screen.getByRole("option", { name: /Nano Banana Pro/ })).toBeEnabled();
+    const gptImageOption = screen.getByRole("option", {
+      name: /GPT Image 2 OpenAI/,
+    });
+    expect(gptImageOption).toBeEnabled();
+    expect(gptImageOption.querySelector("img")).toHaveAttribute(
+      "src",
+      expect.stringContaining("gpt-image.png"),
+    );
 
     fireEvent.click(screen.getByRole("option", { name: /Nano Banana 2 Lite/ }));
     expect(screen.getByLabelText("Select image model")).toHaveTextContent(
@@ -252,6 +272,18 @@ describe("App", () => {
     );
     expect(screen.queryByRole("button", { name: "2K" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "1K" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Select image model"));
+    fireEvent.click(screen.getByRole("option", { name: /GPT Image 2 OpenAI/ }));
+    expect(screen.getByLabelText("Select image model")).toHaveTextContent(
+      "GPT Image 2",
+    );
+    expect(
+      screen.getByText("GPT Image 2 uses the provider's default output size."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("group", { name: "Resolution" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows catalog models that are temporarily unavailable", async () => {
