@@ -713,7 +713,7 @@ svg {
 
 .model-picker summary {
   display: flex;
-  min-height: 38px;
+  min-height: 42px;
   align-items: center;
   gap: 10px;
   border: 1px solid var(--line);
@@ -738,8 +738,8 @@ svg {
 
 .model-icon {
   display: grid;
-  width: 26px;
-  height: 26px;
+  width: 31px;
+  height: 31px;
   flex: 0 0 auto;
   place-items: center;
   border: 0;
@@ -748,8 +748,8 @@ svg {
 
 .banana-icon img {
   display: block;
-  width: 23px;
-  height: 25px;
+  width: 30px;
+  height: 30px;
   object-fit: contain;
   pointer-events: none;
 }
@@ -818,7 +818,7 @@ svg {
 .model-option {
   display: flex;
   width: 100%;
-  min-height: 38px;
+  min-height: 44px;
   align-items: center;
   gap: 8px;
   border: 0;
@@ -835,20 +835,11 @@ svg {
 .model-option:disabled { color: var(--muted); opacity: 0.58; }
 
 .model-option .model-icon {
-  width: 26px;
-  height: 26px;
+  width: 31px;
+  height: 31px;
 }
 
-.model-option .banana-icon img { width: 23px; height: 25px; }
-
-.model-monogram {
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 5px;
-  color: #c7b8d3;
-  background: linear-gradient(145deg, #49494d, #303033);
-  font-size: 10px;
-  font-weight: 650;
-}
+.model-option .banana-icon img { width: 30px; height: 30px; }
 
 .model-check {
   margin-right: 4px;
@@ -857,24 +848,34 @@ svg {
   font-weight: 650;
 }
 
-.coming-soon {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--muted);
-  font-size: 8px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.coming-soon svg { width: 12px; height: 12px; }
-
 .reference-section {
   display: grid;
   gap: 11px;
   border-bottom: 1px solid var(--line);
   padding-top: 15px;
   padding-bottom: 15px;
+}
+
+.reference-limit-warning {
+  margin: 0;
+  border: 1px solid rgba(251, 191, 36, 0.2);
+  border-radius: 7px;
+  color: #e8c979;
+  background: rgba(251, 191, 36, 0.065);
+  padding: 7px 9px;
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.reference-support-note {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.025);
+  padding: 7px 9px;
+  font-size: 9px;
+  line-height: 1.4;
 }
 
 .reference-list {
@@ -1070,9 +1071,6 @@ svg {
   padding: 2px;
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18);
 }
-
-.ratio-options { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-.resolution-options { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 
 .option-strip button {
   min-width: 0;

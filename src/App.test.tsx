@@ -10,7 +10,12 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import type { GenerationJobEvent, HistoryAttempt, HistoryCursor } from "./shared/types";
+import type {
+  GenerationJobEvent,
+  HistoryAttempt,
+  HistoryCursor,
+  ImageModel,
+} from "./shared/types";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -46,12 +51,48 @@ function emitGeneration(payload: GenerationJobEvent) {
 const appStatus = {
   hasApiKey: true,
   modelId: "google/gemini-3.1-flash-image",
-  modelName: "Nano Banana",
+  modelName: "Nano Banana 2",
   supportedAspectRatios: ["1:1", "2:3", "3:2", "16:9"],
   supportedResolutions: ["1K", "2K", "4K"],
   maxReferences: 14,
   maxReferenceTotalBytes: 48 * 1024 * 1024,
 };
+
+const imageModels: ImageModel[] = [
+  {
+    id: "google/gemini-3.1-flash-lite-image",
+    name: "Nano Banana 2 Lite",
+    provider: "Google",
+    description: "Fast, efficient generation at 1K resolution.",
+    available: true,
+    isDefault: false,
+    supportedAspectRatios: ["1:1", "2:3", "3:2", "16:9"],
+    supportedResolutions: ["1K"],
+    maxReferences: 14,
+  },
+  {
+    id: appStatus.modelId,
+    name: appStatus.modelName,
+    provider: "Google",
+    description: "Balanced speed and quality from 1K through 4K.",
+    available: true,
+    isDefault: true,
+    supportedAspectRatios: appStatus.supportedAspectRatios,
+    supportedResolutions: appStatus.supportedResolutions,
+    maxReferences: 14,
+  },
+  {
+    id: "google/gemini-3-pro-image",
+    name: "Nano Banana Pro",
+    provider: "Google",
+    description: "Higher-quality generation for detail-sensitive work.",
+    available: true,
+    isDefault: false,
+    supportedAspectRatios: ["1:1", "2:3", "3:2", "16:9"],
+    supportedResolutions: ["1K", "2K", "4K"],
+    maxReferences: 14,
+  },
+];
 
 describe("App", () => {
   beforeEach(() => {
@@ -69,15 +110,9 @@ describe("App", () => {
   });
 
   it("shows onboarding when no API key is stored", async () => {
-    invokeMock.mockResolvedValueOnce({
-      hasApiKey: false,
-      modelId: "google/gemini-3.1-flash-image",
-      modelName: "Nano Banana",
-      supportedAspectRatios: ["1:1", "2:3", "3:2", "16:9"],
-      supportedResolutions: ["1K", "2K", "4K"],
-      maxReferences: 14,
-      maxReferenceTotalBytes: 48 * 1024 * 1024,
-    });
+    invokeMock
+      .mockResolvedValueOnce({ ...appStatus, hasApiKey: false })
+      .mockResolvedValueOnce(imageModels);
 
     render(<App />);
 
@@ -101,6 +136,7 @@ describe("App", () => {
       if (command === "get_app_status") {
         return { ...appStatus, hasApiKey: false };
       }
+      if (command === "list_image_models") return imageModels;
       if (command === "list_history") return historyPage([]);
       throw new Error(`Unexpected command: ${command}`);
     });
@@ -130,7 +166,9 @@ describe("App", () => {
   });
 
   it("opens the workspace when a key is already stored", async () => {
-    invokeMock.mockResolvedValueOnce(appStatus);
+    invokeMock
+      .mockResolvedValueOnce(appStatus)
+      .mockResolvedValueOnce(imageModels);
 
     render(<App />);
 
@@ -140,8 +178,62 @@ describe("App", () => {
     expect(screen.getByText("Your image appears here.")).toBeInTheDocument();
   });
 
-  it("shows the active model and disabled upcoming models in the composer", async () => {
-    invokeMock.mockResolvedValueOnce(appStatus);
+  it("opens the workspace without waiting for model discovery", async () => {
+    invokeMock.mockImplementation(async (command) => {
+      if (command === "get_app_status") return appStatus;
+      if (command === "list_image_models") {
+        return new Promise(() => undefined);
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByPlaceholderText("Describe the image you want to make…"),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Select image model")).toHaveTextContent(
+      "google/gemini-3.1-flash-image",
+    );
+  });
+
+  it("keeps the catalog default when model discovery resolves before status", async () => {
+    let releaseStatus!: () => void;
+    const delayedStatus = new Promise<typeof appStatus>((resolve) => {
+      releaseStatus = () => resolve({ ...appStatus, hasApiKey: false });
+    });
+    invokeMock.mockImplementation(async (command) => {
+      if (command === "get_app_status") return delayedStatus;
+      if (command === "list_image_models") return imageModels;
+      if (command === "save_api_key") return appStatus;
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    render(<App />);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    await act(async () => {
+      releaseStatus();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    fireEvent.change(
+      await screen.findByLabelText("OpenRouter API key"),
+      { target: { value: "sk-or-v1-test-key-1234567890" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Connect OpenRouter" }));
+
+    await screen.findByPlaceholderText("Describe the image you want to make…");
+    expect(screen.getByLabelText("Select image model")).toHaveTextContent(
+      "google/gemini-3.1-flash-image",
+    );
+  });
+
+  it("selects among the three available Gemini models", async () => {
+    invokeMock
+      .mockResolvedValueOnce(appStatus)
+      .mockResolvedValueOnce(imageModels);
 
     render(<App />);
 
@@ -149,21 +241,74 @@ describe("App", () => {
     fireEvent.click(screen.getByLabelText("Select image model"));
 
     expect(
-      screen.getByRole("option", { name: /Nano Banana/ }),
+      screen.getByRole("option", { name: /^Nano Banana 2 Google/ }),
     ).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("option", { name: /Nano Banana 2 Lite/ })).toBeEnabled();
+    expect(screen.getByRole("option", { name: /Nano Banana Pro/ })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("option", { name: /Nano Banana 2 Lite/ }));
+    expect(screen.getByLabelText("Select image model")).toHaveTextContent(
+      "Nano Banana 2 Lite",
+    );
+    expect(screen.queryByRole("button", { name: "2K" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "1K" })).toBeInTheDocument();
+  });
+
+  it("shows catalog models that are temporarily unavailable", async () => {
+    const unavailableModels = imageModels.map((model, index) =>
+      index === 0
+        ? {
+            ...model,
+            available: false,
+            unavailableReason: "Unavailable on OpenRouter. Try again later.",
+            supportedAspectRatios: [],
+            supportedResolutions: [],
+            maxReferences: 0,
+          }
+        : model,
+    );
+    invokeMock
+      .mockResolvedValueOnce(appStatus)
+      .mockResolvedValueOnce(unavailableModels);
+
+    render(<App />);
+
+    await screen.findByPlaceholderText("Describe the image you want to make…");
+    fireEvent.click(screen.getByLabelText("Select image model"));
+
+    const unavailable = screen.getByRole("option", {
+      name: /Nano Banana 2 Lite.*Unavailable on OpenRouter. Try again later./,
+    });
+    expect(unavailable).toBeDisabled();
+    expect(unavailable).toHaveTextContent(
+      "Unavailable on OpenRouter. Try again later.",
+    );
+  });
+
+  it("explains when the selected model does not support references", async () => {
+    const modelsWithoutReferences = imageModels.map((model) =>
+      model.id === appStatus.modelId ? { ...model, maxReferences: 0 } : model,
+    );
+    invokeMock
+      .mockResolvedValueOnce(appStatus)
+      .mockResolvedValueOnce(modelsWithoutReferences);
+
+    render(<App />);
+
+    await screen.findByPlaceholderText("Describe the image you want to make…");
+    expect(screen.getByText("Not supported")).toBeInTheDocument();
     expect(
-      screen.getByRole("option", { name: /GPT Image.*Coming soon/ }),
-    ).toBeDisabled();
+      screen.getByText("Nano Banana 2 does not support reference images."),
+    ).toBeInTheDocument();
     expect(
-      screen.getByRole("option", { name: /FLUX.*Coming soon/ }),
-    ).toBeDisabled();
-    expect(
-      screen.getByRole("option", { name: /Ideogram.*Coming soon/ }),
-    ).toBeDisabled();
+      screen.queryByRole("button", { name: /Add reference images/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("dismisses the model picker outside and with Escape", async () => {
-    invokeMock.mockResolvedValueOnce(appStatus);
+    invokeMock
+      .mockResolvedValueOnce(appStatus)
+      .mockResolvedValueOnce(imageModels);
 
     render(<App />);
 
@@ -190,6 +335,7 @@ describe("App", () => {
   it("sends the selected numeric ratio and resolution", async () => {
     invokeMock
       .mockResolvedValueOnce(appStatus)
+      .mockResolvedValueOnce(imageModels)
       .mockResolvedValueOnce({
         requestId: "attempt-1",
       });
@@ -205,9 +351,10 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Generate image" }));
 
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenNthCalledWith(2, "start_generation", {
+      expect(invokeMock).toHaveBeenNthCalledWith(3, "start_generation", {
         request: {
           requestId: expect.any(String),
+          modelId: appStatus.modelId,
           prompt: "A wide night landscape",
           referenceTokens: [],
           aspectRatio: "16:9",
@@ -220,6 +367,7 @@ describe("App", () => {
   it("selects, reorders, and submits multiple reference images", async () => {
     invokeMock.mockImplementation(async (command, args) => {
       if (command === "get_app_status") return appStatus;
+      if (command === "list_image_models") return imageModels;
       if (command === "select_reference_image") {
         return [
           {
@@ -273,6 +421,7 @@ describe("App", () => {
       expect(invokeMock).toHaveBeenCalledWith("start_generation", {
         request: {
           requestId: expect.any(String),
+          modelId: appStatus.modelId,
           prompt: "Blend both references",
           referenceTokens: ["reference-b", "reference-a"],
           aspectRatio: null,
@@ -286,6 +435,7 @@ describe("App", () => {
     let finishSelection!: (value: []) => void;
     invokeMock.mockImplementation(async (command) => {
       if (command === "get_app_status") return appStatus;
+      if (command === "list_image_models") return imageModels;
       if (command === "select_reference_image") {
         return new Promise<[]>((resolve) => {
           finishSelection = resolve;
@@ -323,6 +473,7 @@ describe("App", () => {
     let cancellationCalls = 0;
     invokeMock.mockImplementation(async (command, args) => {
       if (command === "get_app_status") return appStatus;
+      if (command === "list_image_models") return imageModels;
       if (command === "start_generation") {
         requestId = (args as { request: { requestId: string } }).request.requestId;
         return new Promise<{ requestId: string }>((resolve) => {
@@ -354,6 +505,7 @@ describe("App", () => {
   it("renders a completed job from its managed asset path", async () => {
     invokeMock
       .mockResolvedValueOnce(appStatus)
+      .mockResolvedValueOnce(imageModels)
       .mockImplementationOnce(async (_command, args) => ({
         requestId: (args as { request: { requestId: string } }).request.requestId,
       }));
@@ -366,7 +518,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Generate image" }));
 
     await waitFor(() => expect(generationListeners.length).toBeGreaterThan(0));
-    const request = invokeMock.mock.calls[1][1] as {
+    const request = invokeMock.mock.calls[2][1] as {
       request: { requestId: string };
     };
     act(() => {
@@ -395,6 +547,7 @@ describe("App", () => {
   it("opens successful, failed, and cancelled history and edits a failed prompt", async () => {
     invokeMock.mockImplementation(async (command) => {
       if (command === "get_app_status") return appStatus;
+      if (command === "list_image_models") return imageModels;
       if (command === "list_history") {
         return historyPage([
           {
@@ -417,7 +570,7 @@ describe("App", () => {
           {
             id: "failure-1",
             prompt: "A prompt worth revising",
-            modelId: appStatus.modelId,
+            modelId: imageModels[0].id,
             status: "failed",
             settings: { aspectRatio: "16:9", resolution: "1K" },
             createdAt: "2026-08-16T12:30:00Z",
@@ -523,6 +676,9 @@ describe("App", () => {
     expect(
       await screen.findByDisplayValue("A prompt worth revising"),
     ).toBeInTheDocument();
+    expect(screen.getByLabelText("Select image model")).toHaveTextContent(
+      "Nano Banana 2 Lite",
+    );
     expect(screen.getByRole("button", { name: "16:9" })).toHaveClass("selected");
     expect(screen.getByRole("button", { name: "1K" })).toHaveClass("selected");
     expect(await screen.findByText("Saved reference 1")).toBeInTheDocument();
@@ -534,6 +690,7 @@ describe("App", () => {
     let historyCalls = 0;
     invokeMock.mockImplementation(async (command) => {
       if (command === "get_app_status") return appStatus;
+      if (command === "list_image_models") return imageModels;
       if (command === "list_history") {
         historyCalls += 1;
         if (historyCalls === 1) {
@@ -578,6 +735,7 @@ describe("App", () => {
     let historyCalls = 0;
     invokeMock.mockImplementation(async (command) => {
       if (command === "get_app_status") return appStatus;
+      if (command === "list_image_models") return imageModels;
       if (command === "list_history") {
         historyCalls += 1;
         if (historyCalls > 1) throw new Error("database temporarily unavailable");
@@ -618,6 +776,7 @@ describe("App", () => {
     let attemptId = "";
     invokeMock.mockImplementation(async (command, args) => {
       if (command === "get_app_status") return appStatus;
+      if (command === "list_image_models") return imageModels;
       if (command === "start_generation") {
         attemptId = (args as { request: { requestId: string } }).request.requestId;
         return { requestId: attemptId };

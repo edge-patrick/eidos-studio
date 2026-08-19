@@ -7,7 +7,7 @@ import { useStudioController } from "./features/generation/useStudioController";
 import { LibraryScreen } from "./features/history/LibraryScreen";
 import { OnboardingScreen } from "./features/onboarding/OnboardingScreen";
 import { eidosApi, normalizeError } from "./shared/eidosApi";
-import type { AppError, AppStatus } from "./shared/types";
+import type { AppError, AppStatus, ImageModel } from "./shared/types";
 
 type Screen = "loading" | "onboarding" | "workspace";
 
@@ -24,24 +24,43 @@ const fallbackStatus: AppStatus = {
 function App() {
   const [screen, setScreen] = useState<Screen>("loading");
   const [status, setStatus] = useState<AppStatus>(fallbackStatus);
+  const [models, setModels] = useState<ImageModel[]>([]);
   const [apiKey, setApiKey] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [changingKey, setChangingKey] = useState(false);
   const [studioView, setStudioView] = useState<StudioView>("create");
   const [onboardingError, setOnboardingError] = useState<AppError | null>(null);
-  const studio = useStudioController(status);
+  const studio = useStudioController(status, models);
 
   useEffect(() => {
-    eidosApi
-      .getStatus()
+    let active = true;
+    const statusRequest = eidosApi.getStatus();
+    const modelRequest = eidosApi.listImageModels();
+
+    void modelRequest
+      .then((nextModels) => {
+        if (active && nextModels.length > 0) setModels(nextModels);
+      })
+      .catch(() => undefined);
+
+    void statusRequest
       .then((nextStatus) => {
+        if (!active) return;
         setStatus(nextStatus);
+        setModels((current) =>
+          current.length > 0 ? current : [modelFromStatus(nextStatus)],
+        );
         setScreen(nextStatus.hasApiKey ? "workspace" : "onboarding");
       })
       .catch((error) => {
+        if (!active) return;
         setOnboardingError(normalizeError(error));
         setScreen("onboarding");
       });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   async function connectKey(event: FormEvent) {
@@ -51,8 +70,10 @@ function App() {
     setOnboardingError(null);
     try {
       const nextStatus = await eidosApi.saveApiKey(apiKey);
+      const nextModels = await eidosApi.listImageModels();
       setApiKey("");
       setStatus(nextStatus);
+      setModels(nextModels.length > 0 ? nextModels : [modelFromStatus(nextStatus)]);
       setChangingKey(false);
       setScreen("workspace");
     } catch (error) {
@@ -120,6 +141,7 @@ function App() {
         <LibraryScreen
           active={studioView === "library"}
           status={status}
+          models={models}
           generationBusy={studio.busy}
           onDeleted={studio.handleHistoryAttemptDeleted}
           onReuse={async (attempt) => {
@@ -130,6 +152,20 @@ function App() {
       </div>
     </main>
   );
+}
+
+function modelFromStatus(status: AppStatus): ImageModel {
+  return {
+    id: status.modelId,
+    name: status.modelName,
+    provider: "Google",
+    description: "Balanced image generation.",
+    available: true,
+    isDefault: true,
+    supportedAspectRatios: status.supportedAspectRatios,
+    supportedResolutions: status.supportedResolutions,
+    maxReferences: status.maxReferences,
+  };
 }
 
 export default App;

@@ -8,6 +8,19 @@ export interface AppStatus {
   maxReferenceTotalBytes: number;
 }
 
+export interface ImageModel {
+  id: string;
+  name: string;
+  provider: string;
+  description: string;
+  available: boolean;
+  isDefault: boolean;
+  unavailableReason?: string;
+  supportedAspectRatios: string[];
+  supportedResolutions: string[];
+  maxReferences: number;
+}
+
 export interface AppError {
   kind: string;
   message: string;
@@ -28,6 +41,7 @@ export interface ReferenceSelection {
 
 export interface GenerateRequest {
   requestId: string;
+  modelId: string;
   prompt: string;
   referenceTokens: string[];
   aspectRatio: string | null;

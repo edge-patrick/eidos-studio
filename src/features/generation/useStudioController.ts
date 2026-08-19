@@ -6,6 +6,7 @@ import type {
   AppStatus,
   GenerateRequest,
   HistoryAttempt,
+  ImageModel,
   ReferenceSelection,
 } from "../../shared/types";
 import {
@@ -13,8 +14,35 @@ import {
   initialGenerationState,
 } from "./generationState";
 
-export function useStudioController(status: AppStatus) {
-  const maxReferences = status.maxReferences;
+interface ModelSettingsDraft {
+  aspectRatio: string;
+  resolution: string;
+}
+
+const defaultSettings: ModelSettingsDraft = {
+  aspectRatio: "auto",
+  resolution: "auto",
+};
+
+export function useStudioController(status: AppStatus, models: ImageModel[]) {
+  const [selectedModelId, setSelectedModelId] = useState(status.modelId);
+  const selectedModel =
+    models.find((model) => model.id === selectedModelId && model.available) ??
+    models.find((model) => model.isDefault && model.available) ??
+    models.find((model) => model.available) ??
+    models.find((model) => model.id === selectedModelId) ??
+    models[0] ?? {
+      id: status.modelId,
+      name: status.modelName,
+      provider: "Google",
+      description: "Balanced image generation.",
+      available: true,
+      isDefault: true,
+      supportedAspectRatios: status.supportedAspectRatios,
+      supportedResolutions: status.supportedResolutions,
+      maxReferences: status.maxReferences,
+    };
+  const maxReferences = selectedModel.maxReferences;
   const maxReferenceTotalBytes = status.maxReferenceTotalBytes;
   const [prompt, setPrompt] = useState("");
   const [references, setReferences] = useState<ReferenceSelection[]>([]);
@@ -23,8 +51,20 @@ export function useStudioController(status: AppStatus) {
     0,
   );
   const [referenceBusy, setReferenceBusy] = useState(false);
-  const [aspectRatio, setAspectRatio] = useState("auto");
-  const [resolution, setResolution] = useState("auto");
+  const [settingsByModel, setSettingsByModel] = useState<
+    Record<string, ModelSettingsDraft>
+  >({});
+  const selectedSettings = settingsByModel[selectedModel.id] ?? defaultSettings;
+  const aspectRatio =
+    selectedSettings.aspectRatio === "auto" ||
+    selectedModel.supportedAspectRatios.includes(selectedSettings.aspectRatio)
+      ? selectedSettings.aspectRatio
+      : "auto";
+  const resolution =
+    selectedSettings.resolution === "auto" ||
+    selectedModel.supportedResolutions.includes(selectedSettings.resolution)
+      ? selectedSettings.resolution
+      : "auto";
   const [inputError, setInputError] = useState<AppError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [generation, dispatch] = useReducer(
@@ -35,6 +75,19 @@ export function useStudioController(status: AppStatus) {
   const pendingCancellationId = useRef<string | null>(null);
   const eventListenerReady = useRef<Promise<UnlistenFn> | null>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (
+      models.length === 0 ||
+      models.some((model) => model.id === selectedModelId && model.available)
+    ) {
+      return;
+    }
+    const fallback =
+      models.find((model) => model.isDefault && model.available) ??
+      models.find((model) => model.available);
+    if (fallback) setSelectedModelId(fallback.id);
+  }, [models, selectedModelId]);
 
   useEffect(() => {
     const unlisten = eidosApi.listenToGenerationJobs((event) => {
@@ -92,7 +145,7 @@ export function useStudioController(status: AppStatus) {
         overflow.map((selection) => eidosApi.discardReference(selection.token)),
       );
       if (overflow.length > 0) {
-        setNotice(`Nano Banana accepts up to ${maxReferences} reference images.`);
+        setNotice(`${selectedModel.name} accepts up to ${maxReferences} reference images.`);
       }
     } catch (error) {
       setInputError(normalizeError(error));
@@ -139,11 +192,43 @@ export function useStudioController(status: AppStatus) {
     });
   }
 
+  function selectModel(modelId: string) {
+    if (
+      generation.status === "generating" ||
+      !models.some(({ id, available }) => id === modelId && available)
+    ) {
+      return;
+    }
+    setSelectedModelId(modelId);
+    setInputError(null);
+    setNotice(null);
+  }
+
+  function setModelSetting(
+    key: keyof ModelSettingsDraft,
+    value: string,
+  ) {
+    const modelId = selectedModel.id;
+    setSettingsByModel((current) => ({
+      ...current,
+      [modelId]: {
+        ...defaultSettings,
+        ...current[modelId],
+        [key]: value,
+      },
+    }));
+  }
+
+  const referenceLimitExceeded = references.length > maxReferences;
+
   async function generate() {
     if (
       !status.hasApiKey ||
+      !selectedModel.id ||
+      !selectedModel.available ||
       !prompt.trim() ||
       referenceBusy ||
+      referenceLimitExceeded ||
       generation.status === "generating"
     ) {
       return;
@@ -151,6 +236,7 @@ export function useStudioController(status: AppStatus) {
     const requestId = crypto.randomUUID();
     const request: GenerateRequest = {
       requestId,
+      modelId: selectedModel.id,
       prompt,
       referenceTokens: references.map(({ token }) => token),
       aspectRatio: aspectRatio === "auto" ? null : aspectRatio,
@@ -244,22 +330,41 @@ export function useStudioController(status: AppStatus) {
       : [];
     const previousReferences = references;
 
-    setPrompt(attempt.prompt);
-    setAspectRatio(
+    const restoredModel = models.find(
+      (model) => model.id === attempt.modelId && model.available,
+    );
+    const targetModel =
+      restoredModel ??
+      models.find((model) => model.isDefault && model.available) ??
+      models.find((model) => model.available) ??
+      selectedModel;
+    const nextAspectRatio =
       attempt.settings.aspectRatio &&
-        status.supportedAspectRatios.includes(attempt.settings.aspectRatio)
+        targetModel.supportedAspectRatios.includes(attempt.settings.aspectRatio)
         ? attempt.settings.aspectRatio
-        : "auto",
-    );
-    setResolution(
+        : "auto";
+    const nextResolution =
       attempt.settings.resolution &&
-        status.supportedResolutions.includes(attempt.settings.resolution)
+        targetModel.supportedResolutions.includes(attempt.settings.resolution)
         ? attempt.settings.resolution
-        : "auto",
-    );
+        : "auto";
+
+    setPrompt(attempt.prompt);
+    setSelectedModelId(targetModel.id);
+    setSettingsByModel((current) => ({
+      ...current,
+      [targetModel.id]: {
+        aspectRatio: nextAspectRatio,
+        resolution: nextResolution,
+      },
+    }));
     setReferences(nextReferences);
     setInputError(null);
-    setNotice(null);
+    setNotice(
+      restoredModel
+        ? null
+        : "That saved model is no longer available. Eidos selected the default model instead.",
+    );
     dispatch({ type: "reset" });
 
     try {
@@ -281,14 +386,19 @@ export function useStudioController(status: AppStatus) {
     setPrompt,
     promptRef,
     references,
+    models,
+    selectedModel,
+    selectedModelId: selectedModel.id,
+    selectModel,
     maxReferences,
     maxReferenceTotalBytes,
     referenceTotalBytes,
     referenceBusy,
     aspectRatio,
-    setAspectRatio,
+    setAspectRatio: (value: string) => setModelSetting("aspectRatio", value),
     resolution,
-    setResolution,
+    setResolution: (value: string) => setModelSetting("resolution", value),
+    referenceLimitExceeded,
     generation,
     generationError,
     notice,
@@ -303,8 +413,8 @@ export function useStudioController(status: AppStatus) {
     startNewGeneration,
     handleHistoryAttemptDeleted,
     loadHistoryAttempt,
-    aspectRatioOptions: ["auto", ...status.supportedAspectRatios],
-    resolutionOptions: ["auto", ...status.supportedResolutions],
+    aspectRatioOptions: ["auto", ...selectedModel.supportedAspectRatios],
+    resolutionOptions: ["auto", ...selectedModel.supportedResolutions],
   };
 }
 

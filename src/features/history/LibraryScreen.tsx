@@ -18,6 +18,7 @@ import type {
   HistoryAsset,
   HistoryAttempt,
   HistoryCursor,
+  ImageModel,
 } from "../../shared/types";
 
 const HISTORY_PAGE_SIZE = 60;
@@ -25,6 +26,7 @@ const HISTORY_PAGE_SIZE = 60;
 interface LibraryScreenProps {
   active: boolean;
   status: AppStatus;
+  models: ImageModel[];
   generationBusy: boolean;
   onReuse: (attempt: HistoryAttempt) => Promise<void>;
   onDeleted: (attemptId: string) => void;
@@ -33,6 +35,7 @@ interface LibraryScreenProps {
 export function LibraryScreen({
   active,
   status,
+  models,
   generationBusy,
   onReuse,
   onDeleted,
@@ -238,6 +241,7 @@ export function LibraryScreen({
           key={selectedAttempt.id}
           attempt={selectedAttempt}
           status={status}
+          models={models}
           generationBusy={generationBusy}
           onClose={() => setSelectedId(null)}
           onReuse={onReuse}
@@ -296,6 +300,7 @@ function HistoryCard({
 function HistoryInspector({
   attempt,
   status,
+  models,
   generationBusy,
   onClose,
   onReuse,
@@ -303,6 +308,7 @@ function HistoryInspector({
 }: {
   attempt: HistoryAttempt;
   status: AppStatus;
+  models: ImageModel[];
   generationBusy: boolean;
   onClose: () => void;
   onReuse: (attempt: HistoryAttempt) => Promise<void>;
@@ -453,7 +459,7 @@ function HistoryInspector({
           <h3>Details</h3>
           <dl className="history-metadata">
             <Metadata label="Created" value={formatDetailDate(attempt.createdAt)} />
-            <Metadata label="Model" value={modelName(attempt.modelId, status)} />
+            <Metadata label="Model" value={modelName(attempt.modelId, status, models)} />
             {attempt.output && (
               <Metadata label="Size" value={`${attempt.output.width} × ${attempt.output.height}`} />
             )}
@@ -729,7 +735,9 @@ function formatDuration(durationMs: number) {
   return durationMs < 1000 ? `${durationMs}ms` : `${(durationMs / 1000).toFixed(1)}s`;
 }
 
-function modelName(modelId: string, status: AppStatus) {
+function modelName(modelId: string, status: AppStatus, models: ImageModel[]) {
+  const model = models.find(({ id }) => id === modelId);
+  if (model) return model.name;
   if (modelId === status.modelId) return status.modelName;
   const modelPath = modelId.split("/");
   return modelPath[modelPath.length - 1] ?? modelId;

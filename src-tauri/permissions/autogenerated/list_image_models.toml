@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-image-models"
+description = "Enables the list_image_models command without any pre-configured scope."
+commands.allow = ["list_image_models"]
+
+[[permission]]
+identifier = "deny-list-image-models"
+description = "Denies the list_image_models command without any pre-configured scope."
+commands.deny = ["list_image_models"]

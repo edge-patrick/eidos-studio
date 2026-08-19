@@ -7,13 +7,14 @@ use tokio_util::sync::CancellationToken;
 use crate::asset_store::AssetStore;
 use crate::db::DatabaseHandle;
 use crate::error::AppError;
-use crate::models::{AppResult, SelectedReference};
+use crate::models::{AppResult, ImageModel, SelectedReference};
 use crate::openrouter::OpenRouterClient;
 
 pub struct AppState {
     pub database: DatabaseHandle,
     pub openrouter: OpenRouterClient,
     pub references: Mutex<HashMap<String, SelectedReference>>,
+    pub image_models: Mutex<Vec<ImageModel>>,
     pub jobs: Mutex<HashMap<String, CancellationToken>>,
     pub generation_slots: Arc<Semaphore>,
     pub assets: AssetStore,

@@ -13,9 +13,8 @@ use crate::error::{AppError, ErrorKind};
 use crate::images::{create_history_thumbnail, create_reference_thumbnail, inspect_raster};
 use crate::models::{
     AppResult, CancelResult, GenerateRequest, GenerationJobEvent, GenerationJobStatus,
-    GenerationResult, GenerationSettings, IMAGE_MODEL_ID, JobAccepted, MAX_PROMPT_CHARS,
-    MAX_REFERENCE_BYTES, MAX_REFERENCE_TOTAL_BYTES, MAX_REFERENCES, SelectedReference,
-    validate_reference_total_bytes,
+    GenerationResult, GenerationSettings, JobAccepted, MAX_PROMPT_CHARS, MAX_REFERENCE_BYTES,
+    MAX_REFERENCE_TOTAL_BYTES, SelectedReference, validate_reference_total_bytes,
 };
 use crate::state::{AppState, locked};
 
@@ -40,6 +39,7 @@ struct DatabaseReference {
 
 struct GenerationTask {
     request_id: String,
+    model_id: String,
     prompt: String,
     settings: GenerationSettings,
     references: Vec<PreparedReference>,
@@ -54,17 +54,41 @@ pub async fn start(
 ) -> AppResult<JobAccepted> {
     let request_id = validate_request_id(&request.request_id)?;
     let prompt = validate_prompt(&request.prompt)?;
-    let settings = request.validated_settings()?;
+    let model = locked(&state.image_models, "image model")?
+        .iter()
+        .find(|model| model.id == request.model_id)
+        .cloned()
+        .ok_or_else(|| {
+            AppError::new(
+                ErrorKind::Validation,
+                "Choose an available image model.",
+                false,
+            )
+        })?;
+    if !model.available {
+        return Err(AppError::new(
+            ErrorKind::ProviderUnavailable,
+            model
+                .unavailable_reason
+                .clone()
+                .unwrap_or_else(|| "This image model is unavailable.".to_owned()),
+            true,
+        ));
+    }
+    let settings = request.validated_settings(&model)?;
     let settings_json = serde_json::to_string(&settings).map_err(AppError::internal)?;
     // Credentials are required before an attempt becomes durable. Offline use
     // of the local Library must never create authentication-failure history.
     let api_key = crate::credentials::get_api_key()?;
     let permit = acquire_generation_slot(state.generation_slots.clone())?;
 
-    if request.reference_tokens.len() > MAX_REFERENCES {
+    if request.reference_tokens.len() > model.max_references {
         return Err(AppError::new(
             ErrorKind::Validation,
-            format!("Choose no more than {MAX_REFERENCES} reference images."),
+            format!(
+                "{} accepts no more than {} reference images.",
+                model.name, model.max_references
+            ),
             false,
         ));
     }
@@ -122,6 +146,7 @@ pub async fn start(
 
     let database_request_id = request_id.clone();
     let database_prompt = prompt.clone();
+    let database_model_id = model.id.clone();
     let database_result = state
         .database
         .execute(move |database| {
@@ -142,7 +167,7 @@ pub async fn start(
             database.start_attempt(
                 &database_request_id,
                 &database_prompt,
-                IMAGE_MODEL_ID,
+                &database_model_id,
                 i64::try_from(references.len()).map_err(AppError::internal)?,
                 &settings_json,
                 references,
@@ -156,6 +181,7 @@ pub async fn start(
 
     let task = GenerationTask {
         request_id: request_id.clone(),
+        model_id: model.id,
         prompt,
         settings,
         references: prepared_references,
@@ -308,7 +334,7 @@ async fn run(task: GenerationTask, cancellation: CancellationToken, app: AppHand
                         height: image.height,
                         cost_usd: image.cost_usd,
                         duration_ms,
-                        model_id: IMAGE_MODEL_ID,
+                        model_id: task.model_id.clone(),
                         provider_name: image.provider_name,
                     }),
                     error: None,
@@ -366,6 +392,7 @@ async fn generate_and_store(
         .openrouter
         .generate_image(
             &task.api_key,
+            &task.model_id,
             &task.prompt,
             &task.settings,
             &references,

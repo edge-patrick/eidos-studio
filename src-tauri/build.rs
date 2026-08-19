@@ -1,6 +1,7 @@
 fn main() {
     const COMMANDS: &[&str] = &[
         "get_app_status",
+        "list_image_models",
         "save_api_key",
         "remove_api_key",
         "select_reference_image",

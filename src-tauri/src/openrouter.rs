@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::io::Cursor;
 use std::time::Duration;
 
@@ -11,7 +12,10 @@ use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use crate::error::{AppError, ErrorKind};
-use crate::models::{AppResult, GeneratedImage, GenerationSettings, IMAGE_MODEL_ID};
+use crate::models::{
+    AppResult, GeneratedImage, GenerationSettings, IMAGE_MODEL_PRO_ID, ImageModel,
+    fallback_image_models,
+};
 
 const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1/";
 const MAX_IMAGE_BYTES: usize = 64 * 1024 * 1024;
@@ -34,6 +38,35 @@ struct ImageData<'a> {
     b64_json: Cow<'a, str>,
     #[serde(default)]
     media_type: Option<Cow<'a, str>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ImageModelsResponse {
+    data: Vec<RemoteImageModel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RemoteImageModel {
+    id: String,
+    supported_parameters: Option<RemoteSupportedParameters>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RemoteSupportedParameters {
+    aspect_ratio: Option<EnumCapability>,
+    resolution: Option<EnumCapability>,
+    input_references: Option<RangeCapability>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EnumCapability {
+    #[serde(default)]
+    values: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RangeCapability {
+    max: usize,
 }
 
 pub struct OpenRouterClient {
@@ -94,15 +127,86 @@ impl OpenRouterClient {
         Ok(())
     }
 
+    pub async fn list_image_models(&self, api_key: &str) -> AppResult<Vec<ImageModel>> {
+        let response = self
+            .http
+            .get(self.endpoint("images/models")?)
+            .bearer_auth(api_key)
+            .header("X-Title", "Eidos Studio")
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await
+            .map_err(map_reqwest_error)?;
+
+        let status = response.status();
+        let bytes = read_limited(response, MAX_METADATA_RESPONSE_BYTES).await?;
+        if !status.is_success() {
+            return Err(parse_api_error(status, &bytes));
+        }
+
+        let response: ImageModelsResponse = serde_json::from_slice(&bytes).map_err(|error| {
+            AppError::new(
+                ErrorKind::InvalidResponse,
+                "OpenRouter returned an unreadable image-model catalog.",
+                true,
+            )
+            .with_details(error.to_string())
+        })?;
+        let remote = response
+            .data
+            .into_iter()
+            .map(|model| (model.id.clone(), model))
+            .collect::<HashMap<_, _>>();
+
+        fallback_image_models()
+            .into_iter()
+            .map(|mut model| {
+                let Some(discovered) = remote.get(&model.id) else {
+                    model.available = false;
+                    model.unavailable_reason =
+                        Some("Unavailable on OpenRouter. Try again later.".to_owned());
+                    model.supported_aspect_ratios.clear();
+                    model.supported_resolutions.clear();
+                    model.max_references = 0;
+                    return Ok(model);
+                };
+                let supported = discovered.supported_parameters.as_ref().ok_or_else(|| {
+                    AppError::new(
+                        ErrorKind::InvalidResponse,
+                        "OpenRouter returned incomplete image-model capabilities.",
+                        true,
+                    )
+                    .with_details(format!(
+                        "Model {} omitted supported_parameters.",
+                        discovered.id
+                    ))
+                })?;
+                model.supported_aspect_ratios = intersect_values(
+                    model.supported_aspect_ratios,
+                    supported.aspect_ratio.as_ref(),
+                );
+                model.supported_resolutions =
+                    intersect_values(model.supported_resolutions, supported.resolution.as_ref());
+                if let Some(references) = supported.input_references.as_ref() {
+                    model.max_references = model.max_references.min(references.max);
+                } else {
+                    model.max_references = 0;
+                }
+                Ok(model)
+            })
+            .collect()
+    }
+
     pub async fn generate_image(
         &self,
         api_key: &str,
+        model_id: &str,
         prompt: &str,
         settings: &GenerationSettings,
         references: &[(&str, &[u8])],
         cancellation: &CancellationToken,
     ) -> AppResult<GeneratedImage> {
-        let mut payload = generation_payload(prompt, settings);
+        let mut payload = generation_payload(model_id, prompt, settings);
 
         if !references.is_empty() {
             payload["input_references"] = Value::Array(reference_payload(references));
@@ -264,9 +368,19 @@ fn response_too_large_error() -> AppError {
     )
 }
 
-fn generation_payload(prompt: &str, settings: &GenerationSettings) -> Value {
+fn intersect_values(configured: Vec<String>, discovered: Option<&EnumCapability>) -> Vec<String> {
+    let Some(discovered) = discovered else {
+        return Vec::new();
+    };
+    configured
+        .into_iter()
+        .filter(|value| discovered.values.contains(value))
+        .collect()
+}
+
+fn generation_payload(model_id: &str, prompt: &str, settings: &GenerationSettings) -> Value {
     let mut payload = json!({
-        "model": IMAGE_MODEL_ID,
+        "model": model_id,
         "prompt": prompt,
         "n": 1
     });
@@ -276,6 +390,12 @@ fn generation_payload(prompt: &str, settings: &GenerationSettings) -> Value {
     }
     if let Some(resolution) = settings.resolution.as_deref() {
         payload["resolution"] = json!(resolution);
+    }
+    if model_id == IMAGE_MODEL_PRO_ID && settings.resolution.as_deref() == Some("4K") {
+        payload["provider"] = json!({
+            "only": ["google-ai-studio/global"],
+            "allow_fallbacks": false
+        });
     }
 
     payload
@@ -312,7 +432,7 @@ fn raster_format(format: ImageFormat) -> AppResult<(&'static str, &'static str)>
         ImageFormat::WebP => Ok(("image/webp", "webp")),
         _ => Err(AppError::new(
             ErrorKind::InvalidResponse,
-            "Nano Banana returned an unsupported image format.",
+            "The selected model returned an unsupported image format.",
             false,
         )),
     }
@@ -380,19 +500,19 @@ fn parse_api_error(status: StatusCode, bytes: &[u8]) -> AppError {
     } else if reason_upper == "IMAGE_PROHIBITED_CONTENT" {
         AppError::new(
             ErrorKind::GeneratedCandidateBlocked,
-            "Google blocked the generated image candidate. Retrying may produce a different result.",
+            "The provider blocked the generated image candidate. Retrying may produce a different result.",
             true,
         )
     } else if reason_upper.contains("PROMPT") && reason_upper.contains("BLOCK") {
         AppError::new(
             ErrorKind::PromptBlocked,
-            "Google declined the prompt before generating an image.",
+            "The provider declined the prompt before generating an image.",
             false,
         )
     } else if reason_upper.contains("SAFETY") || reason_upper.contains("RECITATION") {
         AppError::new(
             ErrorKind::ProviderSafetyRefusal,
-            "Google declined this generation request.",
+            "The provider declined this generation request.",
             false,
         )
     } else if status == StatusCode::BAD_REQUEST {
@@ -502,6 +622,7 @@ mod tests {
     #[test]
     fn includes_requested_size_settings_in_payload() {
         let payload = generation_payload(
+            crate::models::IMAGE_MODEL_ID,
             "A wide editorial photograph",
             &GenerationSettings {
                 aspect_ratio: Some("16:9".to_owned()),
@@ -516,6 +637,7 @@ mod tests {
     #[test]
     fn omits_provider_default_size_settings() {
         let payload = generation_payload(
+            crate::models::IMAGE_MODEL_ID,
             "A provider-default image",
             &GenerationSettings {
                 aspect_ratio: None,
@@ -525,6 +647,21 @@ mod tests {
 
         assert!(payload.get("aspect_ratio").is_none());
         assert!(payload.get("resolution").is_none());
+    }
+
+    #[test]
+    fn pins_pro_4k_requests_to_the_compatible_endpoint() {
+        let payload = generation_payload(
+            IMAGE_MODEL_PRO_ID,
+            "A detailed campaign image",
+            &GenerationSettings {
+                aspect_ratio: Some("16:9".to_owned()),
+                resolution: Some("4K".to_owned()),
+            },
+        );
+
+        assert_eq!(payload["provider"]["only"][0], "google-ai-studio/global");
+        assert_eq!(payload["provider"]["allow_fallbacks"], false);
     }
 
     #[test]
@@ -580,6 +717,101 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn refreshes_curated_capabilities_from_the_image_catalog() {
+        let body = r#"{"data":[
+            {"id":"google/gemini-3.1-flash-lite-image","supported_parameters":{"resolution":{"type":"enum","values":["1K"]},"aspect_ratio":{"type":"enum","values":["1:1","16:9"]},"input_references":{"type":"range","min":0,"max":10}}},
+            {"id":"google/gemini-3.1-flash-image","supported_parameters":{"resolution":{"type":"enum","values":["1K","2K","4K"]},"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"input_references":{"type":"range","min":0,"max":14}}},
+            {"id":"google/gemini-3-pro-image","supported_parameters":{"resolution":{"type":"enum","values":["1K","2K","4K"]},"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"input_references":{"type":"range","min":0,"max":14}}}
+        ]}"#;
+        let (base_url, request) = mock_server("200 OK", body);
+        let client = OpenRouterClient::new(Client::new(), base_url);
+
+        let models = client
+            .list_image_models("sk-or-v1-test-key")
+            .await
+            .expect("catalog");
+
+        assert_eq!(models.len(), 3);
+        assert!(models.iter().all(|model| model.available));
+        assert_eq!(models[0].supported_aspect_ratios, ["1:1", "16:9"]);
+        assert_eq!(models[0].max_references, 10);
+        let request = request.join().expect("mock request");
+        assert!(request.starts_with("GET /images/models HTTP/1.1"));
+    }
+
+    #[tokio::test]
+    async fn marks_curated_models_missing_from_the_catalog_unavailable() {
+        let body = r#"{"data":[
+            {"id":"google/gemini-3.1-flash-image","supported_parameters":{"resolution":{"type":"enum","values":["1K","2K","4K"]},"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"input_references":{"type":"range","min":0,"max":14}}}
+        ]}"#;
+        let (base_url, request) = mock_server("200 OK", body);
+        let client = OpenRouterClient::new(Client::new(), base_url);
+
+        let models = client
+            .list_image_models("sk-or-v1-test-key")
+            .await
+            .expect("catalog");
+
+        assert_eq!(models.len(), 3);
+        assert!(!models[0].available);
+        assert_eq!(
+            models[0].unavailable_reason.as_deref(),
+            Some("Unavailable on OpenRouter. Try again later.")
+        );
+        assert!(models[0].supported_resolutions.is_empty());
+        assert!(models[1].available);
+        assert_eq!(models[1].supported_resolutions, ["1K", "2K", "4K"]);
+        assert_eq!(models[1].max_references, 14);
+        assert!(!models[2].available);
+        request.join().expect("mock request");
+    }
+
+    #[tokio::test]
+    async fn clears_capabilities_the_catalog_does_not_report() {
+        let body = r#"{"data":[
+            {"id":"google/gemini-3.1-flash-lite-image","supported_parameters":{"resolution":{"type":"enum","values":["1K"]},"aspect_ratio":{"type":"enum","values":["1:1"]},"input_references":{"type":"range","min":0,"max":14}}},
+            {"id":"google/gemini-3.1-flash-image","supported_parameters":{}},
+            {"id":"google/gemini-3-pro-image","supported_parameters":{"resolution":{"type":"enum","values":["1K","2K","4K"]},"aspect_ratio":{"type":"enum","values":["1:1"]},"input_references":{"type":"range","min":0,"max":14}}}
+        ]}"#;
+        let (base_url, request) = mock_server("200 OK", body);
+        let client = OpenRouterClient::new(Client::new(), base_url);
+
+        let models = client
+            .list_image_models("sk-or-v1-test-key")
+            .await
+            .expect("catalog");
+
+        assert!(models[1].available);
+        assert!(models[1].supported_aspect_ratios.is_empty());
+        assert!(models[1].supported_resolutions.is_empty());
+        assert_eq!(models[1].max_references, 0);
+        request.join().expect("mock request");
+    }
+
+    #[tokio::test]
+    async fn rejects_curated_models_without_capability_metadata() {
+        let body = r#"{"data":[
+            {"id":"google/gemini-3.1-flash-image"}
+        ]}"#;
+        let (base_url, request) = mock_server("200 OK", body);
+        let client = OpenRouterClient::new(Client::new(), base_url);
+
+        let error = client
+            .list_image_models("sk-or-v1-test-key")
+            .await
+            .expect_err("missing supported_parameters");
+
+        assert_eq!(error.kind, ErrorKind::InvalidResponse);
+        assert!(
+            error
+                .details
+                .as_deref()
+                .is_some_and(|details| details.contains("gemini-3.1-flash-image"))
+        );
+        request.join().expect("mock request");
+    }
+
+    #[tokio::test]
     async fn rejects_oversized_responses_before_buffering_them() {
         let (base_url, request) =
             mock_server_with_length("200 OK", r#"{"data":{}}"#, MAX_METADATA_RESPONSE_BYTES + 1);
@@ -606,6 +838,7 @@ mod tests {
         let image = client
             .generate_image(
                 "sk-or-v1-test-key",
+                crate::models::IMAGE_MODEL_ID,
                 "A one-pixel image",
                 &GenerationSettings {
                     aspect_ratio: Some("1:1".to_owned()),

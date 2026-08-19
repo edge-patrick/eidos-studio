@@ -8,7 +8,7 @@ use crate::generation;
 use crate::images::{create_history_thumbnail, create_reference_thumbnail, inspect_raster};
 use crate::models::{
     AppResult, AppStatus, CancelResult, DeleteHistoryResult, GenerateRequest, HistoryCursor,
-    HistoryPage, IMAGE_MODEL_ID, IMAGE_MODEL_NAME, JobAccepted, MAX_REFERENCE_BYTES,
+    HistoryPage, IMAGE_MODEL_ID, IMAGE_MODEL_NAME, ImageModel, JobAccepted, MAX_REFERENCE_BYTES,
     MAX_REFERENCE_TOTAL_BYTES, MAX_REFERENCES, ReferenceSelection, SUPPORTED_ASPECT_RATIOS,
     SUPPORTED_RESOLUTIONS, SaveResult, SelectedReference, validate_reference_total_bytes,
 };
@@ -37,6 +37,32 @@ pub fn get_app_status() -> AppResult<AppStatus> {
         max_references: MAX_REFERENCES,
         max_reference_total_bytes: MAX_REFERENCE_TOTAL_BYTES,
     })
+}
+
+#[tauri::command]
+pub async fn list_image_models(state: State<'_, AppState>) -> AppResult<Vec<ImageModel>> {
+    let cached = locked(&state.image_models, "image model")?.clone();
+    let Ok(api_key) = crate::credentials::get_api_key() else {
+        return Ok(cached);
+    };
+
+    let discovered = match state.openrouter.list_image_models(&api_key).await {
+        Ok(discovered) => discovered,
+        Err(error) => {
+            eprintln!(
+                "Image model catalog refresh failed; using cached models ({}): {}",
+                error.kind.as_str(),
+                error
+            );
+            return Ok(cached);
+        }
+    };
+    if discovered.is_empty() {
+        return Ok(cached);
+    }
+
+    *locked(&state.image_models, "image model")? = discovered.clone();
+    Ok(discovered)
 }
 
 #[tauri::command]

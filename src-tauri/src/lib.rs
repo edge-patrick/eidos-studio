@@ -18,6 +18,7 @@ use tokio::sync::Semaphore;
 use crate::asset_store::AssetStore;
 use crate::db::{Database, DatabaseHandle};
 use crate::generation::MAX_CONCURRENT_GENERATIONS;
+use crate::models::fallback_image_models;
 use crate::openrouter::OpenRouterClient;
 use crate::state::AppState;
 
@@ -47,6 +48,7 @@ pub fn run() {
                 database,
                 openrouter,
                 references: Mutex::new(HashMap::new()),
+                image_models: Mutex::new(fallback_image_models()),
                 jobs: Mutex::new(HashMap::new()),
                 generation_slots: Arc::new(Semaphore::new(MAX_CONCURRENT_GENERATIONS)),
                 assets,
@@ -55,6 +57,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_app_status,
+            commands::list_image_models,
             commands::save_api_key,
             commands::remove_api_key,
             commands::select_reference_image,

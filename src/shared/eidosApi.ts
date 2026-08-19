@@ -7,6 +7,7 @@ import type {
   GenerationJobEvent,
   HistoryCursor,
   HistoryPage,
+  ImageModel,
   JobAccepted,
   ReferenceSelection,
   SaveResult,
@@ -47,6 +48,7 @@ export function normalizeError(error: unknown): AppError {
 
 export const eidosApi = {
   getStatus: () => invoke<AppStatus>("get_app_status"),
+  listImageModels: () => invoke<ImageModel[]>("list_image_models"),
   saveApiKey: (apiKey: string) =>
     invoke<AppStatus>("save_api_key", { apiKey }),
   removeApiKey: () => invoke<void>("remove_api_key"),

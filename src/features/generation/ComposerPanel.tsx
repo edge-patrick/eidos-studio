@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import nanoBananaLogo from "../../assets/nano-banana-logo.svg";
+import nanoBananaLite from "../../assets/nano-banana-lite.png";
+import nanoBananaPro from "../../assets/nano-banana-pro.png";
+import nanoBananaRegular from "../../assets/nano-banana-regular.png";
 import {
   ArrowIcon,
-  ClockIcon,
   CloseIcon,
   PlusIcon,
 } from "../../components/Icons";
@@ -15,11 +16,11 @@ interface ComposerPanelProps {
   studio: StudioController;
 }
 
-const upcomingModels = [
-  { name: "GPT Image", maker: "OpenAI", monogram: "G" },
-  { name: "FLUX", maker: "Black Forest Labs", monogram: "F" },
-  { name: "Ideogram", maker: "Ideogram", monogram: "I" },
-];
+const modelIcons: Record<string, string> = {
+  "google/gemini-3.1-flash-lite-image": nanoBananaLite,
+  "google/gemini-3.1-flash-image": nanoBananaRegular,
+  "google/gemini-3-pro-image": nanoBananaPro,
+};
 
 export function ComposerPanel({ status, studio }: ComposerPanelProps) {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
@@ -67,7 +68,8 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
     void studio.generate();
   }
 
-  function closeModelPicker() {
+  function chooseModel(modelId: string) {
+    studio.selectModel(modelId);
     dismissModelPicker(true);
   }
 
@@ -131,12 +133,10 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
             aria-expanded={modelPickerOpen}
             aria-controls="image-model-options"
           >
-            <span className="model-icon banana-icon">
-              <img src={nanoBananaLogo} alt="" draggable={false} />
-            </span>
+            <ModelIcon modelId={studio.selectedModelId} />
             <span className="model-copy">
-              <strong>{status.modelName}</strong>
-              <small>{status.modelId}</small>
+              <strong>{studio.selectedModel.name}</strong>
+              <small>{studio.selectedModel.id}</small>
             </span>
             <span className="model-chevron" aria-hidden="true" />
           </summary>
@@ -147,43 +147,29 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
             role="listbox"
             aria-label="Image model"
           >
-            <button
-              className="model-option selected"
-              type="button"
-              role="option"
-              aria-selected="true"
-              onClick={closeModelPicker}
-            >
-              <span className="model-icon banana-icon">
-                <img src={nanoBananaLogo} alt="" draggable={false} />
-              </span>
-              <span className="model-copy">
-                <strong>{status.modelName}</strong>
-                <small>{status.modelId}</small>
-              </span>
-              <span className="model-check" aria-hidden="true">✓</span>
-            </button>
-
-            {upcomingModels.map((model) => (
+            {studio.models.map((model) => (
               <button
-                className="model-option"
-                key={model.name}
+                className={`model-option${model.id === studio.selectedModelId ? " selected" : ""}`}
+                key={model.id}
                 type="button"
                 role="option"
-                aria-selected="false"
-                disabled
+                aria-selected={model.id === studio.selectedModelId}
+                onClick={() => chooseModel(model.id)}
+                disabled={studio.busy || !model.available}
+                title={model.available ? model.description : model.unavailableReason}
               >
-                <span className="model-icon model-monogram" aria-hidden="true">
-                  {model.monogram}
-                </span>
+                <ModelIcon modelId={model.id} />
                 <span className="model-copy">
                   <strong>{model.name}</strong>
-                  <small>{model.maker}</small>
+                  <small>
+                    {model.available
+                      ? `${model.provider} · ${formatResolutionRange(model.supportedResolutions)}`
+                      : model.unavailableReason ?? "Unavailable on OpenRouter. Try again later."}
+                  </small>
                 </span>
-                <span className="coming-soon">
-                  <ClockIcon />
-                  Coming soon
-                </span>
+                {model.id === studio.selectedModelId && (
+                  <span className="model-check" aria-hidden="true">✓</span>
+                )}
               </button>
             ))}
           </div>
@@ -195,11 +181,21 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
           <span>03</span>
           <span>References</span>
           <small>
-            {studio.references.length > 0
-              ? `${studio.references.length} / ${studio.maxReferences}`
-              : "Optional"}
+            {studio.maxReferences === 0
+              ? "Not supported"
+              : studio.references.length > 0
+                ? `${studio.references.length} / ${studio.maxReferences}`
+                : "Optional"}
           </small>
         </div>
+
+        {studio.maxReferences === 0 && (
+          <p className="reference-support-note" role="status">
+            {studio.selectedModel.name} does not support reference images.
+            {studio.references.length > 0 &&
+              " Remove the selected images or choose another model."}
+          </p>
+        )}
 
         {studio.references.length > 0 && (
           <div
@@ -272,6 +268,13 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
           </div>
         )}
 
+        {studio.referenceLimitExceeded && studio.maxReferences > 0 && (
+          <p className="reference-limit-warning" role="alert">
+            {studio.selectedModel.name} accepts {studio.maxReferences} references. Remove the
+            extras or choose another model.
+          </p>
+        )}
+
         {studio.references.length < studio.maxReferences &&
           studio.referenceTotalBytes < studio.maxReferenceTotalBytes && (
           <button
@@ -342,8 +345,10 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
           onClick={generate}
           disabled={
             !status.hasApiKey ||
+            !studio.selectedModel.available ||
             !studio.prompt.trim() ||
             studio.referenceBusy ||
+            studio.referenceLimitExceeded ||
             studio.busy
           }
           title={
@@ -389,6 +394,21 @@ function ReferenceThumbnail({
   );
 }
 
+function ModelIcon({ modelId }: { modelId: string }) {
+  const icon = modelIcons[modelId] ?? nanoBananaRegular;
+  return (
+    <span className="model-icon banana-icon" aria-hidden="true">
+      <img src={icon} alt="" draggable={false} />
+    </span>
+  );
+}
+
+function formatResolutionRange(resolutions: string[]) {
+  if (resolutions.length === 0) return "Provider default";
+  if (resolutions.length === 1) return `${resolutions[0]} only`;
+  return `${resolutions[0]}–${resolutions[resolutions.length - 1]}`;
+}
+
 interface OptionStripProps {
   id: string;
   className: string;
@@ -416,6 +436,7 @@ function OptionStrip({
         className={`option-strip ${className}`}
         role="group"
         aria-labelledby={labelId}
+        style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
       >
         {options.map((option) => (
           <button

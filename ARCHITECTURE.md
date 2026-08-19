@@ -23,6 +23,7 @@ flowchart LR
 - `src-tauri/src/commands.rs` validates command-boundary input and delegates application work.
 - `src-tauri/src/generation.rs` owns generation job lifecycle and cancellation.
 - `src-tauri/src/openrouter.rs` is an injectable provider adapter; tests point it at a loopback server.
+- The Rust model catalog starts from a curated fallback and refreshes supported capabilities from OpenRouter when a key is available. React only renders settings reported for the selected model.
 - `src-tauri/src/db.rs` owns migrations and transactional metadata changes.
 - `src-tauri/src/asset_store.rs` owns managed files and atomic, content-addressed writes.
 - SQLite runs on a dedicated database thread; async jobs submit short operations instead of waiting on a blocking mutex.
@@ -64,7 +65,7 @@ SQLite cannot share an atomic transaction with the filesystem. The write orderin
 ## Adding future features
 
 - History uses cursor-paged Rust/SQLite queries and returns metadata plus managed paths; it does not send image bytes across IPC. The grid uses 512 px managed thumbnails while the inspector and lightbox retain the original image.
-- Runtime model discovery belongs behind a provider/catalog service. Expose normalized model capabilities through an IPC command, then render controls from those capabilities.
+- Extend model discovery through the existing Rust provider/catalog boundary and normalized `list_image_models` IPC contract; keep provider-specific response shapes out of React.
 - Comparison should maintain `Record<requestId, GenerationState>` (or an equivalent store) and reuse the existing start/cancel/event protocol.
 - If the application gains deep links or independently navigable pages, add a router then. Screen extraction already keeps that change outside the feature logic.
 

@@ -3,13 +3,76 @@ use serde::{Deserialize, Serialize};
 use crate::error::{AppError, ErrorKind};
 
 pub const IMAGE_MODEL_ID: &str = "google/gemini-3.1-flash-image";
-pub const IMAGE_MODEL_NAME: &str = "Nano Banana";
+pub const IMAGE_MODEL_NAME: &str = "Nano Banana 2";
+pub const IMAGE_MODEL_LITE_ID: &str = "google/gemini-3.1-flash-lite-image";
+pub const IMAGE_MODEL_PRO_ID: &str = "google/gemini-3-pro-image";
 pub const MAX_PROMPT_CHARS: usize = 8_000;
 pub const MAX_REFERENCE_BYTES: u64 = 12 * 1024 * 1024;
 pub const MAX_REFERENCE_TOTAL_BYTES: u64 = 48 * 1024 * 1024;
 pub const MAX_REFERENCES: usize = 14;
 pub const SUPPORTED_ASPECT_RATIOS: &[&str] = &["1:1", "2:3", "3:2", "16:9"];
 pub const SUPPORTED_RESOLUTIONS: &[&str] = &["1K", "2K", "4K"];
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageModel {
+    pub id: String,
+    pub name: String,
+    pub provider: String,
+    pub description: String,
+    pub available: bool,
+    pub is_default: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unavailable_reason: Option<String>,
+    pub supported_aspect_ratios: Vec<String>,
+    pub supported_resolutions: Vec<String>,
+    pub max_references: usize,
+}
+
+pub fn fallback_image_models() -> Vec<ImageModel> {
+    vec![
+        ImageModel {
+            id: IMAGE_MODEL_LITE_ID.to_owned(),
+            name: "Nano Banana 2 Lite".to_owned(),
+            provider: "Google".to_owned(),
+            description: "Fast, efficient generation at 1K resolution.".to_owned(),
+            available: true,
+            is_default: false,
+            unavailable_reason: None,
+            supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
+            supported_resolutions: vec!["1K".to_owned()],
+            max_references: MAX_REFERENCES,
+        },
+        ImageModel {
+            id: IMAGE_MODEL_ID.to_owned(),
+            name: IMAGE_MODEL_NAME.to_owned(),
+            provider: "Google".to_owned(),
+            description: "Balanced speed and quality from 1K through 4K.".to_owned(),
+            available: true,
+            is_default: true,
+            unavailable_reason: None,
+            supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
+            supported_resolutions: owned_values(SUPPORTED_RESOLUTIONS),
+            max_references: MAX_REFERENCES,
+        },
+        ImageModel {
+            id: IMAGE_MODEL_PRO_ID.to_owned(),
+            name: "Nano Banana Pro".to_owned(),
+            provider: "Google".to_owned(),
+            description: "Higher-quality generation for detail-sensitive work.".to_owned(),
+            available: true,
+            is_default: false,
+            unavailable_reason: None,
+            supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
+            supported_resolutions: owned_values(SUPPORTED_RESOLUTIONS),
+            max_references: MAX_REFERENCES,
+        },
+    ]
+}
+
+fn owned_values(values: &[&str]) -> Vec<String> {
+    values.iter().map(|value| (*value).to_owned()).collect()
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,6 +103,7 @@ pub struct ReferenceSelection {
 #[serde(rename_all = "camelCase")]
 pub struct GenerateRequest {
     pub request_id: String,
+    pub model_id: String,
     pub prompt: String,
     #[serde(default)]
     pub reference_tokens: Vec<String>,
@@ -110,16 +174,16 @@ pub struct DeleteHistoryResult {
 }
 
 impl GenerateRequest {
-    pub fn validated_settings(&self) -> AppResult<GenerationSettings> {
+    pub fn validated_settings(&self, model: &ImageModel) -> AppResult<GenerationSettings> {
         Ok(GenerationSettings {
             aspect_ratio: validate_setting(
                 self.aspect_ratio.as_deref(),
-                SUPPORTED_ASPECT_RATIOS,
+                &model.supported_aspect_ratios,
                 "aspect ratio",
             )?,
             resolution: validate_setting(
                 self.resolution.as_deref(),
-                SUPPORTED_RESOLUTIONS,
+                &model.supported_resolutions,
                 "resolution",
             )?,
         })
@@ -142,12 +206,14 @@ pub fn validate_reference_total_bytes(total_bytes: u64, maximum_bytes: u64) -> A
 
 fn validate_setting(
     requested: Option<&str>,
-    supported: &[&str],
+    supported: &[String],
     setting_name: &str,
 ) -> AppResult<Option<String>> {
     match requested {
         None => Ok(None),
-        Some(value) if supported.contains(&value) => Ok(Some(value.to_owned())),
+        Some(value) if supported.iter().any(|candidate| candidate == value) => {
+            Ok(Some(value.to_owned()))
+        }
         Some(_) => Err(AppError::new(
             ErrorKind::Validation,
             format!("Choose a supported {setting_name}."),
@@ -166,7 +232,7 @@ pub struct GenerationResult {
     pub height: u32,
     pub cost_usd: Option<f64>,
     pub duration_ms: i64,
-    pub model_id: &'static str,
+    pub model_id: String,
     pub provider_name: Option<String>,
 }
 
@@ -234,9 +300,14 @@ pub type AppResult<T> = Result<T, AppError>;
 mod tests {
     use super::*;
 
-    fn request(aspect_ratio: Option<&str>, resolution: Option<&str>) -> GenerateRequest {
+    fn request(
+        model_id: &str,
+        aspect_ratio: Option<&str>,
+        resolution: Option<&str>,
+    ) -> GenerateRequest {
         GenerateRequest {
             request_id: "request-id".to_owned(),
+            model_id: model_id.to_owned(),
             prompt: "A test image".to_owned(),
             reference_tokens: Vec::new(),
             aspect_ratio: aspect_ratio.map(ToOwned::to_owned),
@@ -246,8 +317,12 @@ mod tests {
 
     #[test]
     fn validates_supported_generation_settings() {
-        let settings = request(Some("16:9"), Some("2K"))
-            .validated_settings()
+        let model = fallback_image_models()
+            .into_iter()
+            .find(|model| model.id == IMAGE_MODEL_ID)
+            .expect("default model");
+        let settings = request(IMAGE_MODEL_ID, Some("16:9"), Some("2K"))
+            .validated_settings(&model)
             .expect("settings");
 
         assert_eq!(settings.aspect_ratio.as_deref(), Some("16:9"));
@@ -256,9 +331,26 @@ mod tests {
 
     #[test]
     fn rejects_unknown_generation_settings() {
-        let error = request(Some("5:7"), None)
-            .validated_settings()
+        let model = fallback_image_models()
+            .into_iter()
+            .find(|model| model.id == IMAGE_MODEL_ID)
+            .expect("default model");
+        let error = request(IMAGE_MODEL_ID, Some("5:7"), None)
+            .validated_settings(&model)
             .expect_err("unsupported aspect ratio should fail");
+
+        assert_eq!(error.kind, ErrorKind::Validation);
+    }
+
+    #[test]
+    fn lite_model_rejects_higher_resolutions() {
+        let model = fallback_image_models()
+            .into_iter()
+            .find(|model| model.id == IMAGE_MODEL_LITE_ID)
+            .expect("lite model");
+        let error = request(IMAGE_MODEL_LITE_ID, None, Some("2K"))
+            .validated_settings(&model)
+            .expect_err("lite must remain 1K-only");
 
         assert_eq!(error.kind, ErrorKind::Validation);
     }

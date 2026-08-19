@@ -10,7 +10,10 @@ export function ResultPanel({ studio }: { studio: StudioController }) {
   return (
     <section className="result-panel" aria-label="Generated image">
       {generation.status === "generating" ? (
-        <DevelopingState onCancel={studio.cancelGeneration} />
+        <DevelopingState
+          modelName={studio.selectedModel.name}
+          onCancel={studio.cancelGeneration}
+        />
       ) : generation.status === "ready" ? (
         <div className="result-view">
           <div className="result-image-wrap">
@@ -100,13 +103,19 @@ export function ResultPanel({ studio }: { studio: StudioController }) {
   );
 }
 
-function DevelopingState({ onCancel }: { onCancel: () => Promise<void> }) {
+function DevelopingState({
+  modelName,
+  onCancel,
+}: {
+  modelName: string;
+  onCancel: () => Promise<void>;
+}) {
   return (
     <div className="developing-state">
       <div className="developing-logo" aria-hidden="true">
         <img src={eidosLogo} alt="" draggable={false} />
       </div>
-      <p className="eyebrow">Nano Banana is working</p>
+      <p className="eyebrow">{modelName} is working</p>
       <h2>Developing image</h2>
       <div className="exposure-line" aria-hidden="true">
         <span />

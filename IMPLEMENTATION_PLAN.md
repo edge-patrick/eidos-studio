@@ -151,6 +151,16 @@ Add multiple image models without hardcoding their controls.
 - Estimated price before generation and actual cost afterward
 - Provider-specific error metadata
 
+### Current implementation slice
+
+- Curated Gemini Flash Lite, Flash, and Pro image models, refreshed with normalized OpenRouter capabilities at runtime
+- Model selection with capability-aware aspect ratio, resolution, and reference limits
+- Per-model setting drafts and exact model restoration from local history
+- Exact selected model persisted for every attempt
+- Explicit Google AI Studio routing for Gemini Pro 4K requests
+
+Pricing discovery, manual catalog refresh, advanced settings, endpoint visibility, and general provider selection remain for later slices.
+
 ### Done when
 
 - Unsupported settings cannot be selected.

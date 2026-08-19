@@ -8,6 +8,7 @@
     "core:event:allow-unlisten",
     "core:window:allow-start-dragging",
     "allow-get-app-status",
+    "allow-list-image-models",
     "allow-save-api-key",
     "allow-remove-api-key",
     "allow-select-reference-image",

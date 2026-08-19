@@ -25,7 +25,7 @@ image generation alone.
 | Billing | ✅ Pay only when you generate | ❌ Pay about $20 every month |
 | 50 images | ✅ About $3.35 | ❌ About $20 for the plan |
 | Output controls | ✅ Choose aspect ratio, 1K, 2K, or 4K | ❌ Fewer explicit controls |
-| Model choice | ✅ Gemini now, ChatGPT Image coming soon | ❌ Gemini only |
+| Model choice | ✅ Choose among three Gemini image tiers | ❌ Gemini only |
 | Cost visibility | ✅ See the exact cost of every image | ❌ No per-image dollar cost |
 | Storage | ✅ Keep your library locally on your Mac | ❌ Tied to your Google account |
 | Source code | ✅ Free and open source | ❌ Closed source |
@@ -34,13 +34,16 @@ image generation alone.
 
 ## Supported models
 
-- google/gemini-3.1-flash-image
+- `google/gemini-3.1-flash-lite-image` — Nano Banana 2 Lite (1K)
+- `google/gemini-3.1-flash-image` — Nano Banana 2 (1K, 2K, or 4K)
+- `google/gemini-3-pro-image` — Nano Banana Pro (1K, 2K, or 4K)
 
 ## What it can do
 
 - Generate an image from a text prompt
 - Use up to 14 ordered local images as references (12 MB each, 48 MB combined)
-- Choose an aspect ratio and 1K, 2K, or 4K resolution
+- Switch models while keeping model-specific settings separate
+- Choose a supported aspect ratio and resolution for the selected model
 - Browse successful, failed, and cancelled generations in a local image library
 - Reuse prompts, settings, and reference images from earlier generations
 - Save generated images elsewhere or permanently delete them from local storage
@@ -61,6 +64,7 @@ Version 0.3.1 adds up to 14 ordered reference images per generation, with reorde
 - [x] Polished interface and refreshed branding
 - [x] A full history and image library
 - [x] Multiple reference images
+- [x] Multiple Gemini models with capability-aware settings
 - [ ] More image models and settings
 - [ ] Side-by-side model comparison
 - [ ] More ways to save and share generated images
