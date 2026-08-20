@@ -1,6 +1,11 @@
 import eidosLogo from "../../assets/eidos-logo.svg";
 import { ErrorMessage } from "../../components/ErrorMessage";
-import { ArrowIcon, DownloadIcon } from "../../components/Icons";
+import {
+  ArrowIcon,
+  DownloadIcon,
+  PlusIcon,
+  RetryIcon,
+} from "../../components/Icons";
 import { eidosApi } from "../../shared/eidosApi";
 import type { StudioController } from "./useStudioController";
 
@@ -47,17 +52,19 @@ export function ResultPanel({ studio }: { studio: StudioController }) {
           )}
           <div className="result-actions">
             <button
-              className="stage-secondary-button"
+              className="result-action-button"
               type="button"
               onClick={studio.startNewGeneration}
             >
+              <PlusIcon />
               New prompt
             </button>
             <button
-              className="stage-secondary-button"
+              className="result-action-button"
               type="button"
               onClick={() => void studio.generate()}
             >
+              <RetryIcon />
               Retry
             </button>
             <button

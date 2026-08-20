@@ -52,9 +52,9 @@ image generation alone.
 
 Prompts and reference images stay in the local Eidos library, but they are sent to OpenRouter and the model provider when you generate an image.
 
-## What's new in 0.3.1
+## What's new in 0.4.0
 
-Version 0.3.1 adds up to 14 ordered reference images per generation, with reordering, safe per-image and combined size limits, efficient reference thumbnails, and complete multi-reference reuse from the local Library.
+Version 0.4.0 adds GPT Image 2 support and makes the generated-result actions easier to find. Starting a new prompt now clears the previous result and prompt text while preserving reusable model, size, and reference settings.
 
 ## Roadmap
 

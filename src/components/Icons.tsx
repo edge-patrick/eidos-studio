@@ -46,6 +46,15 @@ export function PlusIcon() {
   );
 }
 
+export function RetryIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M15.5 7.5V3.8M15.5 3.8h-3.7" />
+      <path d="M15.1 4.8a6.5 6.5 0 1 0 1.2 7" />
+    </svg>
+  );
+}
+
 export function KeyIcon() {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">

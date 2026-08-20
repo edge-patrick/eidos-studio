@@ -534,7 +534,7 @@ describe("App", () => {
     await waitFor(() => expect(cancellationCalls).toBe(2));
   });
 
-  it("renders a completed job from its managed asset path", async () => {
+  it("renders a completed job and clears the text for a new prompt", async () => {
     invokeMock
       .mockResolvedValueOnce(appStatus)
       .mockResolvedValueOnce(imageModels)
@@ -574,6 +574,13 @@ describe("App", () => {
       "asset://localhost//managed/output.png",
     );
     expect(convertFileSrcMock).toHaveBeenCalledWith("/managed/output.png");
+
+    fireEvent.click(screen.getByRole("button", { name: "New prompt" }));
+
+    expect(prompt).toHaveValue("");
+    expect(screen.queryByAltText("Generated result")).not.toBeInTheDocument();
+    expect(screen.getByText("Your image appears here.")).toBeInTheDocument();
+    await waitFor(() => expect(prompt).toHaveFocus());
   });
 
   it("opens successful, failed, and cancelled history and edits a failed prompt", async () => {

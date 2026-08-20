@@ -305,6 +305,7 @@ export function useStudioController(status: AppStatus, models: ImageModel[]) {
 
   function startNewGeneration() {
     dispatch({ type: "reset" });
+    setPrompt("");
     setInputError(null);
     setNotice(null);
     window.setTimeout(() => promptRef.current?.focus(), 0);
