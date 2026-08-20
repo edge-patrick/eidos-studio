@@ -25,7 +25,7 @@ image generation alone.
 | Billing | ✅ Pay only when you generate | ❌ Pay about $20 every month |
 | 50 images | ✅ About $3.35 | ❌ About $20 for the plan |
 | Output controls | ✅ Choose aspect ratio, 1K, 2K, or 4K | ❌ Fewer explicit controls |
-| Model choice | ✅ Choose across Google and OpenAI models | ❌ Gemini only |
+| Model choice | ✅ Choose across Google, OpenAI, and Black Forest Labs models | ❌ Gemini only |
 | Cost visibility | ✅ See the exact cost of every image | ❌ No per-image dollar cost |
 | Storage | ✅ Keep your library locally on your Mac | ❌ Tied to your Google account |
 | Source code | ✅ Free and open source | ❌ Closed source |
@@ -38,6 +38,10 @@ image generation alone.
 - `google/gemini-3.1-flash-image` — Nano Banana 2 (1K, 2K, or 4K)
 - `google/gemini-3-pro-image` — Nano Banana Pro (1K, 2K, or 4K)
 - `openai/gpt-image-2` — GPT Image 2 (capability-aware sizing and references)
+- `black-forest-labs/flux.2-klein-4b` — FLUX.2 Klein 4B (fast, cost-efficient generation)
+- `black-forest-labs/flux.2-pro` — FLUX.2 Pro (balanced production quality)
+- `black-forest-labs/flux.2-flex` — FLUX.2 Flex (typography and fine detail)
+- `black-forest-labs/flux.2-max` — FLUX.2 Max (top-tier quality and consistency)
 
 ## What it can do
 
@@ -52,9 +56,9 @@ image generation alone.
 
 Prompts and reference images stay in the local Eidos library, but they are sent to OpenRouter and the model provider when you generate an image.
 
-## What's new in 0.4.0
+## What's new in 0.4.1
 
-Version 0.4.0 adds GPT Image 2 support and makes the generated-result actions easier to find. Starting a new prompt now clears the previous result and prompt text while preserving reusable model, size, and reference settings.
+Version 0.4.1 adds the complete FLUX.2 image family through OpenRouter: Klein 4B, Pro, Flex, and Max. Each model includes capability-aware aspect ratios and reference-image limits.
 
 ## Roadmap
 
@@ -65,7 +69,7 @@ Version 0.4.0 adds GPT Image 2 support and makes the generated-result actions ea
 - [x] Polished interface and refreshed branding
 - [x] A full history and image library
 - [x] Multiple reference images
-- [x] Multiple Google and OpenAI models with capability-aware settings
+- [x] Multiple Google, OpenAI, and Black Forest Labs models with capability-aware settings
 - [ ] More image models and settings
 - [ ] Side-by-side model comparison
 - [ ] More ways to save and share generated images

@@ -7,6 +7,10 @@ pub const IMAGE_MODEL_NAME: &str = "Nano Banana 2";
 pub const IMAGE_MODEL_LITE_ID: &str = "google/gemini-3.1-flash-lite-image";
 pub const IMAGE_MODEL_PRO_ID: &str = "google/gemini-3-pro-image";
 pub const GPT_IMAGE_2_ID: &str = "openai/gpt-image-2";
+pub const FLUX_2_KLEIN_ID: &str = "black-forest-labs/flux.2-klein-4b";
+pub const FLUX_2_PRO_ID: &str = "black-forest-labs/flux.2-pro";
+pub const FLUX_2_FLEX_ID: &str = "black-forest-labs/flux.2-flex";
+pub const FLUX_2_MAX_ID: &str = "black-forest-labs/flux.2-max";
 pub const MAX_PROMPT_CHARS: usize = 8_000;
 pub const MAX_REFERENCE_BYTES: u64 = 12 * 1024 * 1024;
 pub const MAX_REFERENCE_TOTAL_BYTES: u64 = 48 * 1024 * 1024;
@@ -80,6 +84,60 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
             supported_resolutions: Vec::new(),
             max_references: MAX_REFERENCES,
+        },
+        ImageModel {
+            id: FLUX_2_KLEIN_ID.to_owned(),
+            name: "FLUX.2 Klein 4B".to_owned(),
+            provider: "Black Forest Labs".to_owned(),
+            description: "Fast, cost-efficient generation and editing for rapid iteration."
+                .to_owned(),
+            available: true,
+            is_default: false,
+            unavailable_reason: None,
+            supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
+            supported_resolutions: Vec::new(),
+            max_references: 4,
+        },
+        ImageModel {
+            id: FLUX_2_PRO_ID.to_owned(),
+            name: "FLUX.2 Pro".to_owned(),
+            provider: "Black Forest Labs".to_owned(),
+            description:
+                "Production-quality generation and editing with balanced speed and fidelity."
+                    .to_owned(),
+            available: true,
+            is_default: false,
+            unavailable_reason: None,
+            supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
+            supported_resolutions: Vec::new(),
+            max_references: 8,
+        },
+        ImageModel {
+            id: FLUX_2_FLEX_ID.to_owned(),
+            name: "FLUX.2 Flex".to_owned(),
+            provider: "Black Forest Labs".to_owned(),
+            description:
+                "Fine-detail and typography-focused generation with flexible creative control."
+                    .to_owned(),
+            available: true,
+            is_default: false,
+            unavailable_reason: None,
+            supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
+            supported_resolutions: Vec::new(),
+            max_references: 8,
+        },
+        ImageModel {
+            id: FLUX_2_MAX_ID.to_owned(),
+            name: "FLUX.2 Max".to_owned(),
+            provider: "Black Forest Labs".to_owned(),
+            description: "Top-tier image quality, prompt understanding, and editing consistency."
+                .to_owned(),
+            available: true,
+            is_default: false,
+            unavailable_reason: None,
+            supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
+            supported_resolutions: Vec::new(),
+            max_references: 8,
         },
     ]
 }
@@ -383,6 +441,41 @@ mod tests {
         assert!(model.supported_resolutions.is_empty());
         assert_eq!(model.max_references, MAX_REFERENCES);
         assert_eq!(models.iter().filter(|model| model.is_default).count(), 1);
+    }
+
+    #[test]
+    fn includes_the_complete_flux_2_family() {
+        let models = fallback_image_models();
+        let flux_models = models
+            .iter()
+            .filter(|model| model.provider == "Black Forest Labs")
+            .collect::<Vec<_>>();
+
+        assert_eq!(flux_models.len(), 4);
+        assert_eq!(
+            flux_models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            [
+                FLUX_2_KLEIN_ID,
+                FLUX_2_PRO_ID,
+                FLUX_2_FLEX_ID,
+                FLUX_2_MAX_ID,
+            ]
+        );
+        assert_eq!(flux_models[0].max_references, 4);
+        assert!(
+            flux_models[1..]
+                .iter()
+                .all(|model| model.max_references == 8)
+        );
+        assert!(
+            flux_models
+                .iter()
+                .all(|model| model.supported_resolutions.is_empty())
+        );
+        assert!(flux_models.iter().all(|model| !model.is_default));
     }
 
     #[test]

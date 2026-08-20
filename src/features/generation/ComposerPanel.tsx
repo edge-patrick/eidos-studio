@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import flux from "../../assets/flux.png";
 import gptImage from "../../assets/gpt-image.png";
 import nanoBananaLite from "../../assets/nano-banana-lite.png";
 import nanoBananaPro from "../../assets/nano-banana-pro.png";
@@ -18,6 +19,10 @@ interface ComposerPanelProps {
 }
 
 const modelIcons: Record<string, string> = {
+  "black-forest-labs/flux.2-klein-4b": flux,
+  "black-forest-labs/flux.2-pro": flux,
+  "black-forest-labs/flux.2-flex": flux,
+  "black-forest-labs/flux.2-max": flux,
   "openai/gpt-image-2": gptImage,
   "google/gemini-3.1-flash-lite-image": nanoBananaLite,
   "google/gemini-3.1-flash-image": nanoBananaRegular,

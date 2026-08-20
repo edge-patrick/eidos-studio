@@ -882,7 +882,11 @@ mod tests {
             {"id":"google/gemini-3.1-flash-lite-image","supported_parameters":{"resolution":{"type":"enum","values":["1K"]},"aspect_ratio":{"type":"enum","values":["1:1","16:9"]},"input_references":{"type":"range","min":0,"max":10}}},
             {"id":"google/gemini-3.1-flash-image","supported_parameters":{"resolution":{"type":"enum","values":["1K","2K","4K"]},"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"input_references":{"type":"range","min":0,"max":14}}},
             {"id":"google/gemini-3-pro-image","supported_parameters":{"resolution":{"type":"enum","values":["1K","2K","4K"]},"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"input_references":{"type":"range","min":0,"max":14}}},
-            {"id":"openai/gpt-image-2","supported_parameters":{"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"input_references":{"type":"range","min":0,"max":16}}}
+            {"id":"openai/gpt-image-2","supported_parameters":{"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"input_references":{"type":"range","min":0,"max":16}}},
+            {"id":"black-forest-labs/flux.2-klein-4b","supported_parameters":{"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"output_format":{"type":"enum","values":["png","jpeg"]},"input_references":{"type":"range","min":0,"max":4},"seed":{"type":"boolean"}}},
+            {"id":"black-forest-labs/flux.2-pro","supported_parameters":{"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"output_format":{"type":"enum","values":["png","jpeg"]},"input_references":{"type":"range","min":0,"max":8},"seed":{"type":"boolean"}}},
+            {"id":"black-forest-labs/flux.2-flex","supported_parameters":{"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"output_format":{"type":"enum","values":["png","jpeg"]},"input_references":{"type":"range","min":0,"max":8},"seed":{"type":"boolean"}}},
+            {"id":"black-forest-labs/flux.2-max","supported_parameters":{"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"output_format":{"type":"enum","values":["png","jpeg"]},"input_references":{"type":"range","min":0,"max":8},"seed":{"type":"boolean"}}}
         ]}"#;
         let (base_url, request) = mock_server("200 OK", body);
         let client = OpenRouterClient::new(Client::new(), base_url);
@@ -892,12 +896,19 @@ mod tests {
             .await
             .expect("catalog");
 
-        assert_eq!(models.len(), 4);
+        assert_eq!(models.len(), 8);
         assert!(models.iter().all(|model| model.available));
         assert_eq!(models[0].supported_aspect_ratios, ["1:1", "16:9"]);
         assert_eq!(models[0].max_references, 10);
         assert!(models[3].supported_resolutions.is_empty());
         assert_eq!(models[3].max_references, crate::models::MAX_REFERENCES);
+        assert_eq!(models[4].max_references, 4);
+        assert!(models[5..].iter().all(|model| model.max_references == 8));
+        assert!(
+            models[4..]
+                .iter()
+                .all(|model| model.supported_resolutions.is_empty())
+        );
         let request = request.join().expect("mock request");
         assert!(request.starts_with("GET /images/models HTTP/1.1"));
     }
@@ -915,7 +926,7 @@ mod tests {
             .await
             .expect("catalog");
 
-        assert_eq!(models.len(), 4);
+        assert_eq!(models.len(), 8);
         assert!(!models[0].available);
         assert_eq!(
             models[0].unavailable_reason.as_deref(),
@@ -927,6 +938,7 @@ mod tests {
         assert_eq!(models[1].max_references, 14);
         assert!(!models[2].available);
         assert!(!models[3].available);
+        assert!(models[4..].iter().all(|model| !model.available));
         request.join().expect("mock request");
     }
 

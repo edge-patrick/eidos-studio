@@ -104,6 +104,53 @@ const imageModels: ImageModel[] = [
     supportedResolutions: [],
     maxReferences: 14,
   },
+  {
+    id: "black-forest-labs/flux.2-klein-4b",
+    name: "FLUX.2 Klein 4B",
+    provider: "Black Forest Labs",
+    description: "Fast, cost-efficient generation and editing for rapid iteration.",
+    available: true,
+    isDefault: false,
+    supportedAspectRatios: appStatus.supportedAspectRatios,
+    supportedResolutions: [],
+    maxReferences: 4,
+  },
+  {
+    id: "black-forest-labs/flux.2-pro",
+    name: "FLUX.2 Pro",
+    provider: "Black Forest Labs",
+    description:
+      "Production-quality generation and editing with balanced speed and fidelity.",
+    available: true,
+    isDefault: false,
+    supportedAspectRatios: appStatus.supportedAspectRatios,
+    supportedResolutions: [],
+    maxReferences: 8,
+  },
+  {
+    id: "black-forest-labs/flux.2-flex",
+    name: "FLUX.2 Flex",
+    provider: "Black Forest Labs",
+    description:
+      "Fine-detail and typography-focused generation with flexible creative control.",
+    available: true,
+    isDefault: false,
+    supportedAspectRatios: appStatus.supportedAspectRatios,
+    supportedResolutions: [],
+    maxReferences: 8,
+  },
+  {
+    id: "black-forest-labs/flux.2-max",
+    name: "FLUX.2 Max",
+    provider: "Black Forest Labs",
+    description:
+      "Top-tier image quality, prompt understanding, and editing consistency.",
+    available: true,
+    isDefault: false,
+    supportedAspectRatios: appStatus.supportedAspectRatios,
+    supportedResolutions: [],
+    maxReferences: 8,
+  },
 ];
 
 describe("App", () => {
@@ -265,6 +312,14 @@ describe("App", () => {
       "src",
       expect.stringContaining("gpt-image.png"),
     );
+    const fluxProOption = screen.getByRole("option", {
+      name: /FLUX\.2 Pro Black Forest Labs/,
+    });
+    expect(fluxProOption).toBeEnabled();
+    expect(fluxProOption.querySelector("img")).toHaveAttribute(
+      "src",
+      expect.stringContaining("flux.png"),
+    );
 
     fireEvent.click(screen.getByRole("option", { name: /Nano Banana 2 Lite/ }));
     expect(screen.getByLabelText("Select image model")).toHaveTextContent(
@@ -284,6 +339,17 @@ describe("App", () => {
     expect(
       screen.queryByRole("group", { name: "Resolution" }),
     ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Select image model"));
+    fireEvent.click(
+      screen.getByRole("option", { name: /FLUX\.2 Pro Black Forest Labs/ }),
+    );
+    expect(screen.getByLabelText("Select image model")).toHaveTextContent(
+      "FLUX.2 Pro",
+    );
+    expect(
+      screen.getByText("FLUX.2 Pro uses the provider's default output size."),
+    ).toBeInTheDocument();
   });
 
   it("shows catalog models that are temporarily unavailable", async () => {

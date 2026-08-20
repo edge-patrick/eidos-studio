@@ -816,11 +816,15 @@ svg {
   right: 0;
   left: 0;
   display: grid;
+  max-height: 300px;
   gap: 2px;
   border: 1px solid var(--line-strong);
   border-radius: 9px;
   background: rgba(42, 42, 45, 0.98);
   padding: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   box-shadow: 0 16px 42px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   backdrop-filter: blur(24px) saturate(1.1);
   -webkit-backdrop-filter: blur(24px) saturate(1.1);
