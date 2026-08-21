@@ -63,7 +63,7 @@ const imageModels: ImageModel[] = [
     id: "google/gemini-3.1-flash-lite-image",
     name: "Nano Banana 2 Lite",
     provider: "Google",
-    description: "Fast, efficient generation at 1K resolution.",
+    description: "Fast, low-cost 1K drafts and quick iterations.",
     available: true,
     isDefault: false,
     supportedAspectRatios: ["1:1", "2:3", "3:2", "16:9"],
@@ -74,7 +74,7 @@ const imageModels: ImageModel[] = [
     id: appStatus.modelId,
     name: appStatus.modelName,
     provider: "Google",
-    description: "Balanced speed and quality from 1K through 4K.",
+    description: "Best everyday balance of speed and quality.",
     available: true,
     isDefault: true,
     supportedAspectRatios: appStatus.supportedAspectRatios,
@@ -85,7 +85,7 @@ const imageModels: ImageModel[] = [
     id: "google/gemini-3-pro-image",
     name: "Nano Banana Pro",
     provider: "Google",
-    description: "Higher-quality generation for detail-sensitive work.",
+    description: "Higher detail for polished, precision-sensitive work.",
     available: true,
     isDefault: false,
     supportedAspectRatios: ["1:1", "2:3", "3:2", "16:9"],
@@ -96,8 +96,7 @@ const imageModels: ImageModel[] = [
     id: "openai/gpt-image-2",
     name: "GPT Image 2",
     provider: "OpenAI",
-    description:
-      "Fast, high-quality generation and editing with high-fidelity references.",
+    description: "Strong at faithful edits, references, and complex instructions.",
     available: true,
     isDefault: false,
     supportedAspectRatios: ["1:1", "2:3", "3:2", "16:9"],
@@ -108,7 +107,7 @@ const imageModels: ImageModel[] = [
     id: "black-forest-labs/flux.2-klein-4b",
     name: "FLUX.2 Klein 4B",
     provider: "Black Forest Labs",
-    description: "Fast, cost-efficient generation and editing for rapid iteration.",
+    description: "Fast, affordable exploration and many variations.",
     available: true,
     isDefault: false,
     supportedAspectRatios: appStatus.supportedAspectRatios,
@@ -119,8 +118,7 @@ const imageModels: ImageModel[] = [
     id: "black-forest-labs/flux.2-pro",
     name: "FLUX.2 Pro",
     provider: "Black Forest Labs",
-    description:
-      "Production-quality generation and editing with balanced speed and fidelity.",
+    description: "Balanced production quality without the cost of Max.",
     available: true,
     isDefault: false,
     supportedAspectRatios: appStatus.supportedAspectRatios,
@@ -131,8 +129,7 @@ const imageModels: ImageModel[] = [
     id: "black-forest-labs/flux.2-flex",
     name: "FLUX.2 Flex",
     provider: "Black Forest Labs",
-    description:
-      "Fine-detail and typography-focused generation with flexible creative control.",
+    description: "Typography, fine detail, and greater creative control.",
     available: true,
     isDefault: false,
     supportedAspectRatios: appStatus.supportedAspectRatios,
@@ -143,8 +140,7 @@ const imageModels: ImageModel[] = [
     id: "black-forest-labs/flux.2-max",
     name: "FLUX.2 Max",
     provider: "Black Forest Labs",
-    description:
-      "Top-tier image quality, prompt understanding, and editing consistency.",
+    description: "Highest FLUX quality and consistency for final work.",
     available: true,
     isDefault: false,
     supportedAspectRatios: appStatus.supportedAspectRatios,
@@ -156,6 +152,7 @@ const imageModels: ImageModel[] = [
 describe("App", () => {
   beforeEach(() => {
     cleanup();
+    window.localStorage.clear();
     invokeMock.mockReset();
     listenMock.mockReset();
     generationListeners = [];
@@ -350,6 +347,78 @@ describe("App", () => {
     expect(
       screen.getByText("FLUX.2 Pro uses the provider's default output size."),
     ).toBeInTheDocument();
+  });
+
+  it("manages and persists which models appear in the picker", async () => {
+    invokeMock
+      .mockResolvedValueOnce(appStatus)
+      .mockResolvedValueOnce(imageModels);
+
+    const view = render(<App />);
+
+    await screen.findByPlaceholderText("Describe the image you want to make…");
+    const manageButton = screen.getByRole("button", { name: "Manage" });
+    manageButton.focus();
+    fireEvent.click(manageButton);
+
+    expect(
+      screen.getByRole("dialog", { name: "Manage models" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Best everyday balance of speed and quality.")).toBeVisible();
+    expect(
+      screen.getByText(
+        "Est. 1K square: ≈ $0.07 · 1K–4K · Up to 14 reference images",
+      ),
+    ).toBeVisible();
+    const modelManager = screen.getByRole("dialog", { name: "Manage models" });
+    const managerRows = Array.from(modelManager.querySelectorAll("article"));
+    expect(
+      managerRows
+        .find((row) => row.querySelector("strong")?.textContent === "GPT Image 2")
+        ?.querySelector("img"),
+    ).toHaveAttribute("src", expect.stringContaining("gpt-image.png"));
+    expect(
+      managerRows
+        .find((row) => row.querySelector("strong")?.textContent === "FLUX.2 Pro")
+        ?.querySelector("img"),
+    ).toHaveAttribute("src", expect.stringContaining("flux.png"));
+    expect(modelManager.querySelectorAll("article .model-icon img")).toHaveLength(
+      imageModels.length,
+    );
+
+    const selectedToggle = screen.getByRole("checkbox", {
+      name: "Show Nano Banana 2 in model picker",
+    });
+    expect(selectedToggle).toBeChecked();
+    expect(selectedToggle).toBeDisabled();
+
+    const liteToggle = screen.getByRole("checkbox", {
+      name: "Show Nano Banana 2 Lite in model picker",
+    });
+    expect(liteToggle).toBeChecked();
+    fireEvent.click(liteToggle);
+    expect(liteToggle).not.toBeChecked();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Manage models" })).not.toBeInTheDocument();
+    expect(manageButton).toHaveFocus();
+
+    fireEvent.click(screen.getByLabelText("Select image model"));
+    expect(
+      screen.queryByRole("option", { name: /Nano Banana 2 Lite/ }),
+    ).not.toBeInTheDocument();
+
+    view.unmount();
+    invokeMock
+      .mockResolvedValueOnce(appStatus)
+      .mockResolvedValueOnce(imageModels);
+    render(<App />);
+
+    await screen.findByPlaceholderText("Describe the image you want to make…");
+    fireEvent.click(screen.getByLabelText("Select image model"));
+    expect(
+      screen.queryByRole("option", { name: /Nano Banana 2 Lite/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows catalog models that are temporarily unavailable", async () => {

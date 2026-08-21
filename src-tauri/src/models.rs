@@ -40,7 +40,7 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             id: IMAGE_MODEL_LITE_ID.to_owned(),
             name: "Nano Banana 2 Lite".to_owned(),
             provider: "Google".to_owned(),
-            description: "Fast, efficient generation at 1K resolution.".to_owned(),
+            description: "Fast, low-cost 1K drafts and quick iterations.".to_owned(),
             available: true,
             is_default: false,
             unavailable_reason: None,
@@ -52,7 +52,7 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             id: IMAGE_MODEL_ID.to_owned(),
             name: IMAGE_MODEL_NAME.to_owned(),
             provider: "Google".to_owned(),
-            description: "Balanced speed and quality from 1K through 4K.".to_owned(),
+            description: "Best everyday balance of speed and quality.".to_owned(),
             available: true,
             is_default: true,
             unavailable_reason: None,
@@ -64,7 +64,7 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             id: IMAGE_MODEL_PRO_ID.to_owned(),
             name: "Nano Banana Pro".to_owned(),
             provider: "Google".to_owned(),
-            description: "Higher-quality generation for detail-sensitive work.".to_owned(),
+            description: "Higher detail for polished, precision-sensitive work.".to_owned(),
             available: true,
             is_default: false,
             unavailable_reason: None,
@@ -76,7 +76,7 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             id: GPT_IMAGE_2_ID.to_owned(),
             name: "GPT Image 2".to_owned(),
             provider: "OpenAI".to_owned(),
-            description: "Fast, high-quality generation and editing with high-fidelity references."
+            description: "Strong at faithful edits, references, and complex instructions."
                 .to_owned(),
             available: true,
             is_default: false,
@@ -89,8 +89,7 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             id: FLUX_2_KLEIN_ID.to_owned(),
             name: "FLUX.2 Klein 4B".to_owned(),
             provider: "Black Forest Labs".to_owned(),
-            description: "Fast, cost-efficient generation and editing for rapid iteration."
-                .to_owned(),
+            description: "Fast, affordable exploration and many variations.".to_owned(),
             available: true,
             is_default: false,
             unavailable_reason: None,
@@ -102,9 +101,7 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             id: FLUX_2_PRO_ID.to_owned(),
             name: "FLUX.2 Pro".to_owned(),
             provider: "Black Forest Labs".to_owned(),
-            description:
-                "Production-quality generation and editing with balanced speed and fidelity."
-                    .to_owned(),
+            description: "Balanced production quality without the cost of Max.".to_owned(),
             available: true,
             is_default: false,
             unavailable_reason: None,
@@ -116,9 +113,7 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             id: FLUX_2_FLEX_ID.to_owned(),
             name: "FLUX.2 Flex".to_owned(),
             provider: "Black Forest Labs".to_owned(),
-            description:
-                "Fine-detail and typography-focused generation with flexible creative control."
-                    .to_owned(),
+            description: "Typography, fine detail, and greater creative control.".to_owned(),
             available: true,
             is_default: false,
             unavailable_reason: None,
@@ -130,8 +125,7 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             id: FLUX_2_MAX_ID.to_owned(),
             name: "FLUX.2 Max".to_owned(),
             provider: "Black Forest Labs".to_owned(),
-            description: "Top-tier image quality, prompt understanding, and editing consistency."
-                .to_owned(),
+            description: "Highest FLUX quality and consistency for final work.".to_owned(),
             available: true,
             is_default: false,
             unavailable_reason: None,

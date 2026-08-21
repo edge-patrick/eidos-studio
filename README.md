@@ -48,6 +48,7 @@ image generation alone.
 - Generate an image from a text prompt
 - Use up to 14 ordered local images as references (12 MB each, 48 MB combined)
 - Switch models while keeping model-specific settings separate
+- Choose which models appear in the model picker
 - Choose a supported aspect ratio and resolution for the selected model
 - Browse successful, failed, and cancelled generations in a local image library
 - Reuse prompts, settings, and reference images from earlier generations
@@ -56,9 +57,9 @@ image generation alone.
 
 Prompts and reference images stay in the local Eidos library, but they are sent to OpenRouter and the model provider when you generate an image.
 
-## What's new in 0.4.1
+## What's new in 0.4.2
 
-Version 0.4.1 adds the complete FLUX.2 image family through OpenRouter: Klein 4B, Pro, Flex, and Max. Each model includes capability-aware aspect ratios and reference-image limits.
+Version 0.4.2 adds a model manager with provider-grouped model details, estimated 1K pricing, capability summaries, and persistent controls for choosing which models appear in the picker.
 
 ## Roadmap
 
@@ -70,6 +71,7 @@ Version 0.4.1 adds the complete FLUX.2 image family through OpenRouter: Klein 4B
 - [x] A full history and image library
 - [x] Multiple reference images
 - [x] Multiple Google, OpenAI, and Black Forest Labs models with capability-aware settings
+- [x] Model catalog management with persistent picker visibility
 - [ ] More image models and settings
 - [ ] Side-by-side model comparison
 - [ ] More ways to save and share generated images

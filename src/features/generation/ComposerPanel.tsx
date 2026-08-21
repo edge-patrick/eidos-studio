@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import flux from "../../assets/flux.png";
-import gptImage from "../../assets/gpt-image.png";
-import nanoBananaLite from "../../assets/nano-banana-lite.png";
-import nanoBananaPro from "../../assets/nano-banana-pro.png";
-import nanoBananaRegular from "../../assets/nano-banana-regular.png";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import {
   ArrowIcon,
   CloseIcon,
@@ -11,6 +12,8 @@ import {
 } from "../../components/Icons";
 import { eidosApi } from "../../shared/eidosApi";
 import type { AppStatus, ReferenceSelection } from "../../shared/types";
+import { ModelIcon } from "./ModelIcon";
+import { ModelManagerModal } from "./ModelManagerModal";
 import type { StudioController } from "./useStudioController";
 
 interface ComposerPanelProps {
@@ -18,28 +21,45 @@ interface ComposerPanelProps {
   studio: StudioController;
 }
 
-const modelIcons: Record<string, string> = {
-  "black-forest-labs/flux.2-klein-4b": flux,
-  "black-forest-labs/flux.2-pro": flux,
-  "black-forest-labs/flux.2-flex": flux,
-  "black-forest-labs/flux.2-max": flux,
-  "openai/gpt-image-2": gptImage,
-  "google/gemini-3.1-flash-lite-image": nanoBananaLite,
-  "google/gemini-3.1-flash-image": nanoBananaRegular,
-  "google/gemini-3-pro-image": nanoBananaPro,
-};
+const HIDDEN_MODELS_STORAGE_KEY = "eidos.hidden-image-models.v1";
 
 export function ComposerPanel({ status, studio }: ComposerPanelProps) {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [modelManagerOpen, setModelManagerOpen] = useState(false);
+  const [hiddenModelIds, setHiddenModelIds] = useState<Set<string>>(
+    readHiddenModelIds,
+  );
   const [draggedReference, setDraggedReference] = useState<string | null>(null);
   const modelPickerRef = useRef<HTMLDetailsElement>(null);
   const modelPickerSummaryRef = useRef<HTMLElement>(null);
+  const modelManageButtonRef = useRef<HTMLButtonElement>(null);
 
   function dismissModelPicker(restoreFocus = false) {
     if (modelPickerRef.current) modelPickerRef.current.open = false;
     setModelPickerOpen(false);
     if (restoreFocus) modelPickerSummaryRef.current?.focus();
   }
+
+  const closeModelManager = useCallback(() => {
+    setModelManagerOpen(false);
+    window.setTimeout(() => modelManageButtonRef.current?.focus(), 0);
+  }, []);
+
+  function setModelVisible(modelId: string, visible: boolean) {
+    if (!visible && modelId === studio.selectedModelId) return;
+    setHiddenModelIds((current) => {
+      const next = new Set(current);
+      if (visible) next.delete(modelId);
+      else next.add(modelId);
+      persistHiddenModelIds(next);
+      return next;
+    });
+  }
+
+  const visibleModels = studio.models.filter(
+    (model) =>
+      model.id === studio.selectedModelId || !hiddenModelIds.has(model.id),
+  );
 
   useEffect(() => {
     function handlePointerDown(event: PointerEvent) {
@@ -69,6 +89,16 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, []);
+
+  useEffect(() => {
+    if (!hiddenModelIds.has(studio.selectedModelId)) return;
+    setHiddenModelIds((current) => {
+      const next = new Set(current);
+      next.delete(studio.selectedModelId);
+      persistHiddenModelIds(next);
+      return next;
+    });
+  }, [hiddenModelIds, studio.selectedModelId]);
 
   function generate() {
     dismissModelPicker();
@@ -121,6 +151,18 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
         <div className="section-heading">
           <span>02</span>
           <span>Model</span>
+          <button
+            ref={modelManageButtonRef}
+            className="model-manage-button"
+            type="button"
+            onClick={() => {
+              dismissModelPicker();
+              setModelManagerOpen(true);
+            }}
+            disabled={studio.busy}
+          >
+            Manage
+          </button>
         </div>
 
         <details
@@ -154,7 +196,7 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
             role="listbox"
             aria-label="Image model"
           >
-            {studio.models.map((model) => (
+            {visibleModels.map((model) => (
               <button
                 className={`model-option${model.id === studio.selectedModelId ? " selected" : ""}`}
                 key={model.id}
@@ -186,14 +228,17 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
       <div className="composer-section reference-section">
         <div className="section-heading">
           <span>03</span>
-          <span>References</span>
-          <small>
-            {studio.maxReferences === 0
-              ? "Not supported"
-              : studio.references.length > 0
-                ? `${studio.references.length} / ${studio.maxReferences}`
-                : "Optional"}
-          </small>
+          <span>
+            References{" "}
+            {studio.maxReferences > 0 && (
+              <span className="section-title-qualifier">(Optional)</span>
+            )}
+          </span>
+          {studio.maxReferences === 0 ? (
+            <small>Not supported</small>
+          ) : studio.references.length > 0 ? (
+            <small>{studio.references.length} / {studio.maxReferences}</small>
+          ) : null}
         </div>
 
         {studio.maxReferences === 0 && (
@@ -376,8 +421,41 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
           <ArrowIcon />
         </button>
       </div>
+
+      {modelManagerOpen && (
+        <ModelManagerModal
+          models={studio.models}
+          selectedModelId={studio.selectedModelId}
+          hiddenModelIds={hiddenModelIds}
+          onVisibilityChange={setModelVisible}
+          onClose={closeModelManager}
+        />
+      )}
     </section>
   );
+}
+
+function readHiddenModelIds() {
+  try {
+    const stored = window.localStorage.getItem(HIDDEN_MODELS_STORAGE_KEY);
+    if (!stored) return new Set<string>();
+    const parsed: unknown = JSON.parse(stored);
+    if (!Array.isArray(parsed)) return new Set<string>();
+    return new Set(parsed.filter((value): value is string => typeof value === "string"));
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function persistHiddenModelIds(modelIds: ReadonlySet<string>) {
+  try {
+    window.localStorage.setItem(
+      HIDDEN_MODELS_STORAGE_KEY,
+      JSON.stringify([...modelIds]),
+    );
+  } catch {
+    // Model visibility remains available for the current session.
+  }
 }
 
 function ReferenceThumbnail({
@@ -406,19 +484,6 @@ function ReferenceThumbnail({
         }
       }}
     />
-  );
-}
-
-function ModelIcon({ modelId }: { modelId: string }) {
-  const icon = modelIcons[modelId];
-  return (
-    <span className="model-icon" aria-hidden="true">
-      {icon ? (
-        <img src={icon} alt="" draggable={false} />
-      ) : (
-        <span className="model-icon-placeholder">◇</span>
-      )}
-    </span>
   );
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "eidos-studio"
-version = "0.4.1"
+version = "0.4.2"
 description = "A local-first image studio powered by OpenRouter"
 authors = ["Eidos Studio contributors"]
 edition = "2024"
