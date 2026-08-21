@@ -25,7 +25,7 @@ image generation alone.
 | Billing | ✅ Pay only when you generate | ❌ Pay about $20 every month |
 | 50 images | ✅ About $3.35 | ❌ About $20 for the plan |
 | Output controls | ✅ Choose aspect ratio, 1K, 2K, or 4K | ❌ Fewer explicit controls |
-| Model choice | ✅ Choose across Google, OpenAI, and Black Forest Labs models | ❌ Gemini only |
+| Model choice | ✅ Choose across Google, OpenAI, Black Forest Labs, ByteDance, Qwen, and Krea models | ❌ Gemini only |
 | Cost visibility | ✅ See the exact cost of every image | ❌ No per-image dollar cost |
 | Storage | ✅ Keep your library locally on your Mac | ❌ Tied to your Google account |
 | Source code | ✅ Free and open source | ❌ Closed source |
@@ -42,6 +42,9 @@ image generation alone.
 - `black-forest-labs/flux.2-pro` — FLUX.2 Pro (balanced production quality)
 - `black-forest-labs/flux.2-flex` — FLUX.2 Flex (typography and fine detail)
 - `black-forest-labs/flux.2-max` — FLUX.2 Max (top-tier quality and consistency)
+- `bytedance-seed/seedream-5-0-pro` — Seedream 5.0 Pro (commercial visuals and precise editing)
+- `qwen/qwen-image-3-pro` — Qwen Image 3 Pro (typography and fine detail)
+- `krea/krea-2-medium-turbo` — Krea 2 Medium Turbo (rapid graphic-design exploration)
 
 ## What it can do
 
@@ -57,9 +60,9 @@ image generation alone.
 
 Prompts and reference images stay in the local Eidos library, but they are sent to OpenRouter and the model provider when you generate an image.
 
-## What's new in 0.4.2
+## What's new in 0.4.3
 
-Version 0.4.2 adds a model manager with provider-grouped model details, estimated 1K pricing, capability summaries, and persistent controls for choosing which models appear in the picker.
+Version 0.4.3 adds Seedream 5.0 Pro, Qwen Image 3 Pro, and Krea 2 Medium Turbo with capability-aware size and reference controls, model icons, and estimated 1K pricing.
 
 ## Roadmap
 
@@ -70,7 +73,7 @@ Version 0.4.2 adds a model manager with provider-grouped model details, estimate
 - [x] Polished interface and refreshed branding
 - [x] A full history and image library
 - [x] Multiple reference images
-- [x] Multiple Google, OpenAI, and Black Forest Labs models with capability-aware settings
+- [x] Multiple Google, OpenAI, Black Forest Labs, ByteDance, Qwen, and Krea models with capability-aware settings
 - [x] Model catalog management with persistent picker visibility
 - [ ] More image models and settings
 - [ ] Side-by-side model comparison

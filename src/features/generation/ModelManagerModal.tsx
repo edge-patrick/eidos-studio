@@ -21,6 +21,9 @@ const estimatedSquare1KPrices: Record<string, string> = {
   "black-forest-labs/flux.2-pro": "$0.03",
   "black-forest-labs/flux.2-flex": "$0.06",
   "black-forest-labs/flux.2-max": "$0.07",
+  "bytedance-seed/seedream-5-0-pro": "$0.045",
+  "qwen/qwen-image-3-pro": "$0.04",
+  "krea/krea-2-medium-turbo": "$0.015",
 };
 
 export function ModelManagerModal({

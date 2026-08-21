@@ -147,6 +147,39 @@ const imageModels: ImageModel[] = [
     supportedResolutions: [],
     maxReferences: 8,
   },
+  {
+    id: "bytedance-seed/seedream-5-0-pro",
+    name: "Seedream 5.0 Pro",
+    provider: "ByteDance Seed",
+    description: "Precise edits, lifelike scenes, and polished commercial visuals.",
+    available: true,
+    isDefault: false,
+    supportedAspectRatios: appStatus.supportedAspectRatios,
+    supportedResolutions: ["1K", "2K"],
+    maxReferences: 14,
+  },
+  {
+    id: "qwen/qwen-image-3-pro",
+    name: "Qwen Image 3 Pro",
+    provider: "Qwen",
+    description: "Precise typography, fine details, and rich world knowledge.",
+    available: true,
+    isDefault: false,
+    supportedAspectRatios: appStatus.supportedAspectRatios,
+    supportedResolutions: ["1K", "2K"],
+    maxReferences: 4,
+  },
+  {
+    id: "krea/krea-2-medium-turbo",
+    name: "Krea 2 Medium Turbo",
+    provider: "Krea",
+    description: "Fast graphic-design exploration and rapid creative iteration.",
+    available: true,
+    isDefault: false,
+    supportedAspectRatios: appStatus.supportedAspectRatios,
+    supportedResolutions: ["1K"],
+    maxReferences: 1,
+  },
 ];
 
 describe("App", () => {
@@ -370,6 +403,21 @@ describe("App", () => {
         "Est. 1K square: ≈ $0.07 · 1K–4K · Up to 14 reference images",
       ),
     ).toBeVisible();
+    expect(
+      screen.getByText(
+        "Est. 1K square: ≈ $0.045 · 1K–2K · Up to 14 reference images",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "Est. 1K square: ≈ $0.04 · 1K–2K · Up to 4 reference images",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "Est. 1K square: ≈ $0.015 · 1K only · Up to 1 reference image",
+      ),
+    ).toBeVisible();
     const modelManager = screen.getByRole("dialog", { name: "Manage models" });
     const managerRows = Array.from(modelManager.querySelectorAll("article"));
     expect(
@@ -382,6 +430,21 @@ describe("App", () => {
         .find((row) => row.querySelector("strong")?.textContent === "FLUX.2 Pro")
         ?.querySelector("img"),
     ).toHaveAttribute("src", expect.stringContaining("flux.png"));
+    expect(
+      managerRows
+        .find((row) => row.querySelector("strong")?.textContent === "Seedream 5.0 Pro")
+        ?.querySelector("img"),
+    ).toHaveAttribute("src", expect.stringContaining("seedream.png"));
+    expect(
+      managerRows
+        .find((row) => row.querySelector("strong")?.textContent === "Qwen Image 3 Pro")
+        ?.querySelector("img"),
+    ).toHaveAttribute("src", expect.stringContaining("qwen.png"));
+    expect(
+      managerRows
+        .find((row) => row.querySelector("strong")?.textContent === "Krea 2 Medium Turbo")
+        ?.querySelector("img"),
+    ).toHaveAttribute("src", expect.stringContaining("krea.png"));
     expect(modelManager.querySelectorAll("article .model-icon img")).toHaveLength(
       imageModels.length,
     );

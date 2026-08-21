@@ -11,6 +11,9 @@ pub const FLUX_2_KLEIN_ID: &str = "black-forest-labs/flux.2-klein-4b";
 pub const FLUX_2_PRO_ID: &str = "black-forest-labs/flux.2-pro";
 pub const FLUX_2_FLEX_ID: &str = "black-forest-labs/flux.2-flex";
 pub const FLUX_2_MAX_ID: &str = "black-forest-labs/flux.2-max";
+pub const SEEDREAM_5_PRO_ID: &str = "bytedance-seed/seedream-5-0-pro";
+pub const QWEN_IMAGE_3_PRO_ID: &str = "qwen/qwen-image-3-pro";
+pub const KREA_2_MEDIUM_TURBO_ID: &str = "krea/krea-2-medium-turbo";
 pub const MAX_PROMPT_CHARS: usize = 8_000;
 pub const MAX_REFERENCE_BYTES: u64 = 12 * 1024 * 1024;
 pub const MAX_REFERENCE_TOTAL_BYTES: u64 = 48 * 1024 * 1024;
@@ -132,6 +135,43 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
             supported_resolutions: Vec::new(),
             max_references: 8,
+        },
+        ImageModel {
+            id: SEEDREAM_5_PRO_ID.to_owned(),
+            name: "Seedream 5.0 Pro".to_owned(),
+            provider: "ByteDance Seed".to_owned(),
+            description: "Precise edits, lifelike scenes, and polished commercial visuals."
+                .to_owned(),
+            available: true,
+            is_default: false,
+            unavailable_reason: None,
+            supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
+            supported_resolutions: vec!["1K".to_owned(), "2K".to_owned()],
+            max_references: MAX_REFERENCES,
+        },
+        ImageModel {
+            id: QWEN_IMAGE_3_PRO_ID.to_owned(),
+            name: "Qwen Image 3 Pro".to_owned(),
+            provider: "Qwen".to_owned(),
+            description: "Precise typography, fine details, and rich world knowledge.".to_owned(),
+            available: true,
+            is_default: false,
+            unavailable_reason: None,
+            supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
+            supported_resolutions: vec!["1K".to_owned(), "2K".to_owned()],
+            max_references: 4,
+        },
+        ImageModel {
+            id: KREA_2_MEDIUM_TURBO_ID.to_owned(),
+            name: "Krea 2 Medium Turbo".to_owned(),
+            provider: "Krea".to_owned(),
+            description: "Fast graphic-design exploration and rapid creative iteration.".to_owned(),
+            available: true,
+            is_default: false,
+            unavailable_reason: None,
+            supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
+            supported_resolutions: vec!["1K".to_owned()],
+            max_references: 1,
         },
     ]
 }
@@ -470,6 +510,38 @@ mod tests {
                 .all(|model| model.supported_resolutions.is_empty())
         );
         assert!(flux_models.iter().all(|model| !model.is_default));
+    }
+
+    #[test]
+    fn includes_seedream_qwen_and_krea_models() {
+        let models = fallback_image_models();
+
+        let seedream = models
+            .iter()
+            .find(|model| model.id == SEEDREAM_5_PRO_ID)
+            .expect("Seedream 5.0 Pro model");
+        assert_eq!(seedream.provider, "ByteDance Seed");
+        assert_eq!(seedream.supported_resolutions, ["1K", "2K"]);
+        assert_eq!(seedream.max_references, MAX_REFERENCES);
+
+        let qwen = models
+            .iter()
+            .find(|model| model.id == QWEN_IMAGE_3_PRO_ID)
+            .expect("Qwen Image 3 Pro model");
+        assert_eq!(qwen.provider, "Qwen");
+        assert_eq!(qwen.supported_resolutions, ["1K", "2K"]);
+        assert_eq!(qwen.max_references, 4);
+
+        let krea = models
+            .iter()
+            .find(|model| model.id == KREA_2_MEDIUM_TURBO_ID)
+            .expect("Krea 2 Medium Turbo model");
+        assert_eq!(krea.provider, "Krea");
+        assert_eq!(krea.supported_resolutions, ["1K"]);
+        assert_eq!(krea.max_references, 1);
+
+        assert!([seedream, qwen, krea].iter().all(|model| !model.is_default));
+        assert_eq!(models.iter().filter(|model| model.is_default).count(), 1);
     }
 
     #[test]
