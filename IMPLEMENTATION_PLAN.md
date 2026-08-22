@@ -153,7 +153,7 @@ Add multiple image models without hardcoding their controls.
 
 ### Current implementation slice
 
-- Curated Gemini Flash Lite, Flash, and Pro models, OpenAI GPT Image 2, the complete FLUX.2 image family, Seedream 5.0 Pro, Qwen Image 3 Pro, and Krea 2 Medium Turbo, refreshed with normalized OpenRouter capabilities at runtime
+- Curated Gemini Flash Lite, Flash, and Pro models, OpenAI GPT Image 2 and GPT Image 1 Mini, the complete FLUX.2 image family, Seedream 5.0 Pro and Lite, Qwen Image 3 Pro and base, Krea 2 Medium Turbo and Medium, Recraft V4.1, and Grok Imagine Image 2.0, refreshed with normalized OpenRouter capabilities at runtime
 - Model selection with capability-aware aspect ratio, resolution, and reference limits
 - Per-model setting drafts and exact model restoration from local history
 - Exact selected model persisted for every attempt

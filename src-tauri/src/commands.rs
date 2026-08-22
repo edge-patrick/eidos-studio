@@ -27,9 +27,19 @@ struct ReferenceCandidate {
 }
 
 #[tauri::command]
-pub fn get_app_status() -> AppResult<AppStatus> {
+pub fn get_app_status(app: AppHandle) -> AppResult<AppStatus> {
+    let has_api_key = crate::credentials::has_api_key(&app)?;
+    let api_key_preview = if has_api_key {
+        Some(crate::credentials::mask_api_key(
+            &crate::credentials::get_api_key(&app)?,
+        ))
+    } else {
+        None
+    };
+
     Ok(AppStatus {
-        has_api_key: crate::credentials::has_api_key()?,
+        has_api_key,
+        api_key_preview,
         model_id: IMAGE_MODEL_ID,
         model_name: IMAGE_MODEL_NAME,
         supported_aspect_ratios: SUPPORTED_ASPECT_RATIOS,
@@ -40,9 +50,12 @@ pub fn get_app_status() -> AppResult<AppStatus> {
 }
 
 #[tauri::command]
-pub async fn list_image_models(state: State<'_, AppState>) -> AppResult<Vec<ImageModel>> {
+pub async fn list_image_models(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<ImageModel>> {
     let cached = locked(&state.image_models, "image model")?.clone();
-    let Ok(api_key) = crate::credentials::get_api_key() else {
+    let Ok(api_key) = crate::credentials::get_api_key(&app) else {
         return Ok(cached);
     };
 
@@ -66,7 +79,11 @@ pub async fn list_image_models(state: State<'_, AppState>) -> AppResult<Vec<Imag
 }
 
 #[tauri::command]
-pub async fn save_api_key(api_key: String, state: State<'_, AppState>) -> AppResult<AppStatus> {
+pub async fn save_api_key(
+    api_key: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<AppStatus> {
     let api_key = api_key.trim().to_owned();
     if api_key.len() < 20 {
         return Err(AppError::new(
@@ -77,10 +94,11 @@ pub async fn save_api_key(api_key: String, state: State<'_, AppState>) -> AppRes
     }
 
     state.openrouter.validate_api_key(&api_key).await?;
-    crate::credentials::save_api_key(&api_key)?;
+    crate::credentials::save_api_key(&app, &api_key)?;
 
     Ok(AppStatus {
         has_api_key: true,
+        api_key_preview: Some(crate::credentials::mask_api_key(&api_key)),
         model_id: IMAGE_MODEL_ID,
         model_name: IMAGE_MODEL_NAME,
         supported_aspect_ratios: SUPPORTED_ASPECT_RATIOS,
@@ -91,8 +109,8 @@ pub async fn save_api_key(api_key: String, state: State<'_, AppState>) -> AppRes
 }
 
 #[tauri::command]
-pub fn remove_api_key() -> AppResult<()> {
-    crate::credentials::remove_api_key()
+pub fn remove_api_key(app: AppHandle) -> AppResult<()> {
+    crate::credentials::remove_api_key(&app)
 }
 
 #[tauri::command]

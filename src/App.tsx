@@ -13,6 +13,7 @@ type Screen = "loading" | "onboarding" | "workspace";
 
 const fallbackStatus: AppStatus = {
   hasApiKey: false,
+  apiKeyPreview: null,
   modelId: "",
   modelName: "",
   supportedAspectRatios: [],
@@ -88,7 +89,11 @@ function App() {
     setOnboardingError(null);
     try {
       await eidosApi.removeApiKey();
-      setStatus((current) => ({ ...current, hasApiKey: false }));
+      setStatus((current) => ({
+        ...current,
+        hasApiKey: false,
+        apiKeyPreview: null,
+      }));
       setChangingKey(false);
       setApiKey("");
       setScreen("onboarding");
@@ -105,13 +110,27 @@ function App() {
     return (
       <OnboardingScreen
         apiKey={apiKey}
+        apiKeyPreview={status.apiKeyPreview}
         setApiKey={setApiKey}
         connecting={connecting}
         changingKey={changingKey}
         hasApiKey={status.hasApiKey}
         error={onboardingError}
         onSubmit={(event) => void connectKey(event)}
-        onBack={() => setScreen("workspace")}
+        onBack={() => {
+          setChangingKey(false);
+          setScreen("workspace");
+        }}
+        onChangeKey={() => {
+          setApiKey("");
+          setOnboardingError(null);
+          setChangingKey(true);
+        }}
+        onCancelChange={() => {
+          setApiKey("");
+          setOnboardingError(null);
+          setChangingKey(false);
+        }}
         onForget={() => void forgetKey()}
         onOpenLibrary={() => {
           setStudioView("library");
@@ -129,7 +148,7 @@ function App() {
         connected={status.hasApiKey}
         onViewChange={setStudioView}
         onChangeKey={() => {
-          setChangingKey(status.hasApiKey);
+          setChangingKey(false);
           setOnboardingError(null);
           setScreen("onboarding");
         }}
@@ -164,7 +183,9 @@ function modelFromStatus(status: AppStatus): ImageModel {
     isDefault: true,
     supportedAspectRatios: status.supportedAspectRatios,
     supportedResolutions: status.supportedResolutions,
+    supportedQualities: [],
     maxReferences: status.maxReferences,
+    referenceConstraints: { maxBytes: 12 * 1024 * 1024 },
   };
 }
 

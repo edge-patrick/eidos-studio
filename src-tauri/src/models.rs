@@ -7,19 +7,41 @@ pub const IMAGE_MODEL_NAME: &str = "Nano Banana 2";
 pub const IMAGE_MODEL_LITE_ID: &str = "google/gemini-3.1-flash-lite-image";
 pub const IMAGE_MODEL_PRO_ID: &str = "google/gemini-3-pro-image";
 pub const GPT_IMAGE_2_ID: &str = "openai/gpt-image-2";
+pub const GPT_IMAGE_1_MINI_ID: &str = "openai/gpt-image-1-mini";
 pub const FLUX_2_KLEIN_ID: &str = "black-forest-labs/flux.2-klein-4b";
 pub const FLUX_2_PRO_ID: &str = "black-forest-labs/flux.2-pro";
 pub const FLUX_2_FLEX_ID: &str = "black-forest-labs/flux.2-flex";
 pub const FLUX_2_MAX_ID: &str = "black-forest-labs/flux.2-max";
 pub const SEEDREAM_5_PRO_ID: &str = "bytedance-seed/seedream-5-0-pro";
+pub const SEEDREAM_5_LITE_ID: &str = "bytedance-seed/seedream-5-0-lite";
 pub const QWEN_IMAGE_3_PRO_ID: &str = "qwen/qwen-image-3-pro";
+pub const QWEN_IMAGE_3_ID: &str = "qwen/qwen-image-3";
 pub const KREA_2_MEDIUM_TURBO_ID: &str = "krea/krea-2-medium-turbo";
+pub const KREA_2_MEDIUM_ID: &str = "krea/krea-2-medium";
+pub const RECRAFT_V4_1_ID: &str = "recraft/recraft-v4.1";
+pub const GROK_IMAGINE_IMAGE_2_ID: &str = "x-ai/grok-imagine-image-2.0";
 pub const MAX_PROMPT_CHARS: usize = 8_000;
 pub const MAX_REFERENCE_BYTES: u64 = 12 * 1024 * 1024;
 pub const MAX_REFERENCE_TOTAL_BYTES: u64 = 48 * 1024 * 1024;
 pub const MAX_REFERENCES: usize = 14;
 pub const SUPPORTED_ASPECT_RATIOS: &[&str] = &["1:1", "2:3", "3:2", "16:9"];
 pub const SUPPORTED_RESOLUTIONS: &[&str] = &["1K", "2K", "4K"];
+const RECRAFT_MAX_REFERENCE_BYTES: u64 = 5_000_000;
+const RECRAFT_MIN_REFERENCE_DIMENSION: u32 = 256;
+const RECRAFT_MAX_REFERENCE_DIMENSION: u32 = 4096;
+const RECRAFT_MAX_REFERENCE_PIXELS: u64 = 16_000_000;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReferenceConstraints {
+    pub max_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_dimension: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_dimension: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_pixels: Option<u64>,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,7 +56,9 @@ pub struct ImageModel {
     pub unavailable_reason: Option<String>,
     pub supported_aspect_ratios: Vec<String>,
     pub supported_resolutions: Vec<String>,
+    pub supported_qualities: Vec<String>,
     pub max_references: usize,
+    pub reference_constraints: ReferenceConstraints,
 }
 
 pub fn fallback_image_models() -> Vec<ImageModel> {
@@ -49,7 +73,9 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             unavailable_reason: None,
             supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
             supported_resolutions: vec!["1K".to_owned()],
+            supported_qualities: Vec::new(),
             max_references: MAX_REFERENCES,
+            reference_constraints: default_reference_constraints(),
         },
         ImageModel {
             id: IMAGE_MODEL_ID.to_owned(),
@@ -61,7 +87,9 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             unavailable_reason: None,
             supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
             supported_resolutions: owned_values(SUPPORTED_RESOLUTIONS),
+            supported_qualities: Vec::new(),
             max_references: MAX_REFERENCES,
+            reference_constraints: default_reference_constraints(),
         },
         ImageModel {
             id: IMAGE_MODEL_PRO_ID.to_owned(),
@@ -73,7 +101,9 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             unavailable_reason: None,
             supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
             supported_resolutions: owned_values(SUPPORTED_RESOLUTIONS),
+            supported_qualities: Vec::new(),
             max_references: MAX_REFERENCES,
+            reference_constraints: default_reference_constraints(),
         },
         ImageModel {
             id: GPT_IMAGE_2_ID.to_owned(),
@@ -86,7 +116,33 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             unavailable_reason: None,
             supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
             supported_resolutions: Vec::new(),
+            supported_qualities: vec![
+                "auto".to_owned(),
+                "low".to_owned(),
+                "medium".to_owned(),
+                "high".to_owned(),
+            ],
             max_references: MAX_REFERENCES,
+            reference_constraints: default_reference_constraints(),
+        },
+        ImageModel {
+            id: GPT_IMAGE_1_MINI_ID.to_owned(),
+            name: "GPT Image 1 Mini".to_owned(),
+            provider: "OpenAI".to_owned(),
+            description: "Cost-efficient OpenAI generation and faithful editing.".to_owned(),
+            available: true,
+            is_default: false,
+            unavailable_reason: None,
+            supported_aspect_ratios: vec!["1:1".to_owned(), "2:3".to_owned(), "3:2".to_owned()],
+            supported_resolutions: Vec::new(),
+            supported_qualities: vec![
+                "auto".to_owned(),
+                "low".to_owned(),
+                "medium".to_owned(),
+                "high".to_owned(),
+            ],
+            max_references: MAX_REFERENCES,
+            reference_constraints: default_reference_constraints(),
         },
         ImageModel {
             id: FLUX_2_KLEIN_ID.to_owned(),
@@ -98,7 +154,9 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             unavailable_reason: None,
             supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
             supported_resolutions: Vec::new(),
+            supported_qualities: Vec::new(),
             max_references: 4,
+            reference_constraints: default_reference_constraints(),
         },
         ImageModel {
             id: FLUX_2_PRO_ID.to_owned(),
@@ -110,7 +168,9 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             unavailable_reason: None,
             supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
             supported_resolutions: Vec::new(),
+            supported_qualities: Vec::new(),
             max_references: 8,
+            reference_constraints: default_reference_constraints(),
         },
         ImageModel {
             id: FLUX_2_FLEX_ID.to_owned(),
@@ -122,7 +182,9 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             unavailable_reason: None,
             supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
             supported_resolutions: Vec::new(),
+            supported_qualities: Vec::new(),
             max_references: 8,
+            reference_constraints: default_reference_constraints(),
         },
         ImageModel {
             id: FLUX_2_MAX_ID.to_owned(),
@@ -134,7 +196,9 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             unavailable_reason: None,
             supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
             supported_resolutions: Vec::new(),
+            supported_qualities: Vec::new(),
             max_references: 8,
+            reference_constraints: default_reference_constraints(),
         },
         ImageModel {
             id: SEEDREAM_5_PRO_ID.to_owned(),
@@ -147,7 +211,24 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             unavailable_reason: None,
             supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
             supported_resolutions: vec!["1K".to_owned(), "2K".to_owned()],
+            supported_qualities: Vec::new(),
             max_references: MAX_REFERENCES,
+            reference_constraints: default_reference_constraints(),
+        },
+        ImageModel {
+            id: SEEDREAM_5_LITE_ID.to_owned(),
+            name: "Seedream 5.0 Lite".to_owned(),
+            provider: "ByteDance Seed".to_owned(),
+            description: "Fast high-resolution exploration with broad reference support."
+                .to_owned(),
+            available: true,
+            is_default: false,
+            unavailable_reason: None,
+            supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
+            supported_resolutions: vec!["2K".to_owned(), "4K".to_owned()],
+            supported_qualities: Vec::new(),
+            max_references: MAX_REFERENCES,
+            reference_constraints: default_reference_constraints(),
         },
         ImageModel {
             id: QWEN_IMAGE_3_PRO_ID.to_owned(),
@@ -159,7 +240,23 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             unavailable_reason: None,
             supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
             supported_resolutions: vec!["1K".to_owned(), "2K".to_owned()],
+            supported_qualities: Vec::new(),
             max_references: 4,
+            reference_constraints: default_reference_constraints(),
+        },
+        ImageModel {
+            id: QWEN_IMAGE_3_ID.to_owned(),
+            name: "Qwen Image 3".to_owned(),
+            provider: "Qwen".to_owned(),
+            description: "Cost-efficient typography, fine detail, and flexible edits.".to_owned(),
+            available: true,
+            is_default: false,
+            unavailable_reason: None,
+            supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
+            supported_resolutions: vec!["1K".to_owned(), "2K".to_owned()],
+            supported_qualities: Vec::new(),
+            max_references: 4,
+            reference_constraints: default_reference_constraints(),
         },
         ImageModel {
             id: KREA_2_MEDIUM_TURBO_ID.to_owned(),
@@ -171,7 +268,59 @@ pub fn fallback_image_models() -> Vec<ImageModel> {
             unavailable_reason: None,
             supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
             supported_resolutions: vec!["1K".to_owned()],
+            supported_qualities: Vec::new(),
             max_references: 1,
+            reference_constraints: default_reference_constraints(),
+        },
+        ImageModel {
+            id: KREA_2_MEDIUM_ID.to_owned(),
+            name: "Krea 2 Medium".to_owned(),
+            provider: "Krea".to_owned(),
+            description: "Stable illustration, anime, painting, and expressive visual styles."
+                .to_owned(),
+            available: true,
+            is_default: false,
+            unavailable_reason: None,
+            supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
+            supported_resolutions: vec!["1K".to_owned()],
+            supported_qualities: Vec::new(),
+            max_references: 1,
+            reference_constraints: default_reference_constraints(),
+        },
+        ImageModel {
+            id: RECRAFT_V4_1_ID.to_owned(),
+            name: "Recraft V4.1".to_owned(),
+            provider: "Recraft".to_owned(),
+            description: "Aesthetic concepts, refined lighting, and polished design work."
+                .to_owned(),
+            available: true,
+            is_default: false,
+            unavailable_reason: None,
+            supported_aspect_ratios: vec![
+                "1:1".to_owned(),
+                "4:3".to_owned(),
+                "3:4".to_owned(),
+                "16:9".to_owned(),
+                "9:16".to_owned(),
+            ],
+            supported_resolutions: Vec::new(),
+            supported_qualities: Vec::new(),
+            max_references: 1,
+            reference_constraints: recraft_reference_constraints(),
+        },
+        ImageModel {
+            id: GROK_IMAGINE_IMAGE_2_ID.to_owned(),
+            name: "Grok Imagine Image 2.0".to_owned(),
+            provider: "xAI".to_owned(),
+            description: "Photoreal generation and editing with selectable quality.".to_owned(),
+            available: true,
+            is_default: false,
+            unavailable_reason: None,
+            supported_aspect_ratios: owned_values(SUPPORTED_ASPECT_RATIOS),
+            supported_resolutions: vec!["1K".to_owned(), "2K".to_owned()],
+            supported_qualities: vec!["low".to_owned(), "medium".to_owned()],
+            max_references: 3,
+            reference_constraints: default_reference_constraints(),
         },
     ]
 }
@@ -180,10 +329,29 @@ fn owned_values(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_owned()).collect()
 }
 
+fn default_reference_constraints() -> ReferenceConstraints {
+    ReferenceConstraints {
+        max_bytes: MAX_REFERENCE_BYTES,
+        min_dimension: None,
+        max_dimension: None,
+        max_pixels: None,
+    }
+}
+
+fn recraft_reference_constraints() -> ReferenceConstraints {
+    ReferenceConstraints {
+        max_bytes: RECRAFT_MAX_REFERENCE_BYTES,
+        min_dimension: Some(RECRAFT_MIN_REFERENCE_DIMENSION),
+        max_dimension: Some(RECRAFT_MAX_REFERENCE_DIMENSION),
+        max_pixels: Some(RECRAFT_MAX_REFERENCE_PIXELS),
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppStatus {
     pub has_api_key: bool,
+    pub api_key_preview: Option<String>,
     pub model_id: &'static str,
     pub model_name: &'static str,
     pub supported_aspect_ratios: &'static [&'static str],
@@ -215,6 +383,7 @@ pub struct GenerateRequest {
     pub reference_tokens: Vec<String>,
     pub aspect_ratio: Option<String>,
     pub resolution: Option<String>,
+    pub quality: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -224,6 +393,8 @@ pub struct GenerationSettings {
     pub aspect_ratio: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resolution: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quality: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -291,6 +462,11 @@ impl GenerateRequest {
                 self.resolution.as_deref(),
                 &model.supported_resolutions,
                 "resolution",
+            )?,
+            quality: validate_setting(
+                self.quality.as_deref(),
+                &model.supported_qualities,
+                "quality",
             )?,
         })
     }
@@ -418,6 +594,7 @@ mod tests {
             reference_tokens: Vec::new(),
             aspect_ratio: aspect_ratio.map(ToOwned::to_owned),
             resolution: resolution.map(ToOwned::to_owned),
+            quality: None,
         }
     }
 
@@ -474,7 +651,22 @@ mod tests {
         assert!(!model.is_default);
         assert!(model.supported_resolutions.is_empty());
         assert_eq!(model.max_references, MAX_REFERENCES);
+        assert_eq!(model.supported_qualities, ["auto", "low", "medium", "high"]);
         assert_eq!(models.iter().filter(|model| model.is_default).count(), 1);
+    }
+
+    #[test]
+    fn validates_model_specific_quality() {
+        let model = fallback_image_models()
+            .into_iter()
+            .find(|model| model.id == GROK_IMAGINE_IMAGE_2_ID)
+            .expect("Grok Imagine Image 2.0 model");
+        let mut request = request(GROK_IMAGINE_IMAGE_2_ID, Some("16:9"), Some("2K"));
+        request.quality = Some("medium".to_owned());
+
+        let settings = request.validated_settings(&model).expect("settings");
+
+        assert_eq!(settings.quality.as_deref(), Some("medium"));
     }
 
     #[test]
@@ -513,7 +705,7 @@ mod tests {
     }
 
     #[test]
-    fn includes_seedream_qwen_and_krea_models() {
+    fn includes_seedream_qwen_krea_recraft_and_grok_models() {
         let models = fallback_image_models();
 
         let seedream = models
@@ -540,8 +732,59 @@ mod tests {
         assert_eq!(krea.supported_resolutions, ["1K"]);
         assert_eq!(krea.max_references, 1);
 
-        assert!([seedream, qwen, krea].iter().all(|model| !model.is_default));
+        let seedream_lite = models
+            .iter()
+            .find(|model| model.id == SEEDREAM_5_LITE_ID)
+            .expect("Seedream 5.0 Lite model");
+        assert_eq!(seedream_lite.supported_resolutions, ["2K", "4K"]);
+
+        let qwen_base = models
+            .iter()
+            .find(|model| model.id == QWEN_IMAGE_3_ID)
+            .expect("Qwen Image 3 model");
+        assert_eq!(qwen_base.supported_resolutions, ["1K", "2K"]);
+
+        let krea_medium = models
+            .iter()
+            .find(|model| model.id == KREA_2_MEDIUM_ID)
+            .expect("Krea 2 Medium model");
+        assert_eq!(krea_medium.max_references, 1);
+
+        let recraft = models
+            .iter()
+            .find(|model| model.id == RECRAFT_V4_1_ID)
+            .expect("Recraft V4.1 model");
+        assert_eq!(recraft.supported_resolutions, Vec::<String>::new());
+        assert_eq!(recraft.max_references, 1);
+        assert_eq!(recraft.reference_constraints.max_bytes, 5_000_000);
+        assert_eq!(recraft.reference_constraints.min_dimension, Some(256));
+        assert_eq!(recraft.reference_constraints.max_dimension, Some(4096));
+        assert_eq!(recraft.reference_constraints.max_pixels, Some(16_000_000));
+
+        let grok = models
+            .iter()
+            .find(|model| model.id == GROK_IMAGINE_IMAGE_2_ID)
+            .expect("Grok Imagine Image 2.0 model");
+        assert_eq!(grok.supported_resolutions, ["1K", "2K"]);
+        assert_eq!(grok.supported_qualities, ["low", "medium"]);
+        assert_eq!(grok.max_references, 3);
+
+        assert!(
+            [
+                seedream,
+                qwen,
+                krea,
+                seedream_lite,
+                qwen_base,
+                krea_medium,
+                recraft,
+                grok,
+            ]
+            .iter()
+            .all(|model| !model.is_default)
+        );
         assert_eq!(models.iter().filter(|model| model.is_default).count(), 1);
+        assert_eq!(models.len(), 17);
     }
 
     #[test]

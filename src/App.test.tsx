@@ -50,6 +50,7 @@ function emitGeneration(payload: GenerationJobEvent) {
 
 const appStatus = {
   hasApiKey: true,
+  apiKeyPreview: "sk-or-v1-••••••••••••7890",
   modelId: "google/gemini-3.1-flash-image",
   modelName: "Nano Banana 2",
   supportedAspectRatios: ["1:1", "2:3", "3:2", "16:9"],
@@ -58,7 +59,7 @@ const appStatus = {
   maxReferenceTotalBytes: 48 * 1024 * 1024,
 };
 
-const imageModels: ImageModel[] = [
+const imageModels = [
   {
     id: "google/gemini-3.1-flash-lite-image",
     name: "Nano Banana 2 Lite",
@@ -68,6 +69,7 @@ const imageModels: ImageModel[] = [
     isDefault: false,
     supportedAspectRatios: ["1:1", "2:3", "3:2", "16:9"],
     supportedResolutions: ["1K"],
+    supportedQualities: [],
     maxReferences: 14,
   },
   {
@@ -79,6 +81,7 @@ const imageModels: ImageModel[] = [
     isDefault: true,
     supportedAspectRatios: appStatus.supportedAspectRatios,
     supportedResolutions: appStatus.supportedResolutions,
+    supportedQualities: [],
     maxReferences: 14,
   },
   {
@@ -90,6 +93,7 @@ const imageModels: ImageModel[] = [
     isDefault: false,
     supportedAspectRatios: ["1:1", "2:3", "3:2", "16:9"],
     supportedResolutions: ["1K", "2K", "4K"],
+    supportedQualities: [],
     maxReferences: 14,
   },
   {
@@ -101,6 +105,19 @@ const imageModels: ImageModel[] = [
     isDefault: false,
     supportedAspectRatios: ["1:1", "2:3", "3:2", "16:9"],
     supportedResolutions: [],
+    supportedQualities: ["auto", "low", "medium", "high"],
+    maxReferences: 14,
+  },
+  {
+    id: "openai/gpt-image-1-mini",
+    name: "GPT Image 1 Mini",
+    provider: "OpenAI",
+    description: "Cost-efficient OpenAI generation and faithful editing.",
+    available: true,
+    isDefault: false,
+    supportedAspectRatios: ["1:1", "2:3", "3:2"],
+    supportedResolutions: [],
+    supportedQualities: ["auto", "low", "medium", "high"],
     maxReferences: 14,
   },
   {
@@ -112,6 +129,7 @@ const imageModels: ImageModel[] = [
     isDefault: false,
     supportedAspectRatios: appStatus.supportedAspectRatios,
     supportedResolutions: [],
+    supportedQualities: [],
     maxReferences: 4,
   },
   {
@@ -123,6 +141,7 @@ const imageModels: ImageModel[] = [
     isDefault: false,
     supportedAspectRatios: appStatus.supportedAspectRatios,
     supportedResolutions: [],
+    supportedQualities: [],
     maxReferences: 8,
   },
   {
@@ -134,6 +153,7 @@ const imageModels: ImageModel[] = [
     isDefault: false,
     supportedAspectRatios: appStatus.supportedAspectRatios,
     supportedResolutions: [],
+    supportedQualities: [],
     maxReferences: 8,
   },
   {
@@ -145,6 +165,7 @@ const imageModels: ImageModel[] = [
     isDefault: false,
     supportedAspectRatios: appStatus.supportedAspectRatios,
     supportedResolutions: [],
+    supportedQualities: [],
     maxReferences: 8,
   },
   {
@@ -156,6 +177,19 @@ const imageModels: ImageModel[] = [
     isDefault: false,
     supportedAspectRatios: appStatus.supportedAspectRatios,
     supportedResolutions: ["1K", "2K"],
+    supportedQualities: [],
+    maxReferences: 14,
+  },
+  {
+    id: "bytedance-seed/seedream-5-0-lite",
+    name: "Seedream 5.0 Lite",
+    provider: "ByteDance Seed",
+    description: "Fast high-resolution exploration with broad reference support.",
+    available: true,
+    isDefault: false,
+    supportedAspectRatios: appStatus.supportedAspectRatios,
+    supportedResolutions: ["2K", "4K"],
+    supportedQualities: [],
     maxReferences: 14,
   },
   {
@@ -167,6 +201,19 @@ const imageModels: ImageModel[] = [
     isDefault: false,
     supportedAspectRatios: appStatus.supportedAspectRatios,
     supportedResolutions: ["1K", "2K"],
+    supportedQualities: [],
+    maxReferences: 4,
+  },
+  {
+    id: "qwen/qwen-image-3",
+    name: "Qwen Image 3",
+    provider: "Qwen",
+    description: "Cost-efficient typography, fine detail, and flexible edits.",
+    available: true,
+    isDefault: false,
+    supportedAspectRatios: appStatus.supportedAspectRatios,
+    supportedResolutions: ["1K", "2K"],
+    supportedQualities: [],
     maxReferences: 4,
   },
   {
@@ -178,9 +225,57 @@ const imageModels: ImageModel[] = [
     isDefault: false,
     supportedAspectRatios: appStatus.supportedAspectRatios,
     supportedResolutions: ["1K"],
+    supportedQualities: [],
     maxReferences: 1,
   },
-];
+  {
+    id: "krea/krea-2-medium",
+    name: "Krea 2 Medium",
+    provider: "Krea",
+    description: "Stable illustration, anime, painting, and expressive visual styles.",
+    available: true,
+    isDefault: false,
+    supportedAspectRatios: appStatus.supportedAspectRatios,
+    supportedResolutions: ["1K"],
+    supportedQualities: [],
+    maxReferences: 1,
+  },
+  {
+    id: "recraft/recraft-v4.1",
+    name: "Recraft V4.1",
+    provider: "Recraft",
+    description: "Aesthetic concepts, refined lighting, and polished design work.",
+    available: true,
+    isDefault: false,
+    supportedAspectRatios: ["1:1", "4:3", "3:4", "16:9", "9:16"],
+    supportedResolutions: [],
+    supportedQualities: [],
+    maxReferences: 1,
+  },
+  {
+    id: "x-ai/grok-imagine-image-2.0",
+    name: "Grok Imagine Image 2.0",
+    provider: "xAI",
+    description: "Photoreal generation and editing with selectable quality.",
+    available: true,
+    isDefault: false,
+    supportedAspectRatios: appStatus.supportedAspectRatios,
+    supportedResolutions: ["1K", "2K"],
+    supportedQualities: ["low", "medium"],
+    maxReferences: 3,
+  },
+].map((model) => ({
+  ...model,
+  referenceConstraints:
+    model.id === "recraft/recraft-v4.1"
+      ? {
+          maxBytes: 5_000_000,
+          minDimension: 256,
+          maxDimension: 4096,
+          maxPixels: 16_000_000,
+        }
+      : { maxBytes: 12 * 1024 * 1024 },
+})) satisfies ImageModel[];
 
 describe("App", () => {
   beforeEach(() => {
@@ -265,6 +360,47 @@ describe("App", () => {
       await screen.findByPlaceholderText("Describe the image you want to make…"),
     ).toBeInTheDocument();
     expect(screen.getByText("Your image appears here.")).toBeInTheDocument();
+  });
+
+  it("shows a distinct stored-key state before opening the replacement form", async () => {
+    invokeMock
+      .mockResolvedValueOnce(appStatus)
+      .mockResolvedValueOnce(imageModels);
+
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /OpenRouter connected/ }),
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "OpenRouter connected" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Stored OpenRouter API key")).toBeDisabled();
+    expect(screen.getByLabelText("Stored OpenRouter API key")).toHaveValue(
+      "sk-or-v1-••••••••••••7890",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Connect OpenRouter" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Change key" }));
+
+    expect(
+      screen.getByRole("heading", { name: "Connect a new key" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("OpenRouter API key")).toBeEnabled();
+    expect(screen.getByLabelText("OpenRouter API key")).toHaveValue("");
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep current key" }));
+    expect(
+      screen.getByRole("heading", { name: "OpenRouter connected" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to studio" }));
+    expect(
+      screen.getByPlaceholderText("Describe the image you want to make…"),
+    ).toBeInTheDocument();
   });
 
   it("opens the workspace without waiting for model discovery", async () => {
@@ -589,6 +725,52 @@ describe("App", () => {
           referenceTokens: [],
           aspectRatio: "16:9",
           resolution: "2K",
+          quality: null,
+        },
+      });
+    });
+  });
+
+  it("shows and submits quality only for models that support it", async () => {
+    invokeMock
+      .mockResolvedValueOnce(appStatus)
+      .mockResolvedValueOnce(imageModels)
+      .mockResolvedValueOnce({ requestId: "attempt-grok" });
+
+    render(<App />);
+
+    const prompt = await screen.findByPlaceholderText(
+      "Describe the image you want to make…",
+    );
+    expect(screen.queryByRole("group", { name: "Quality" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Select image model"));
+    fireEvent.click(
+      screen.getByRole("option", { name: /Grok Imagine Image 2\.0 xAI/ }),
+    );
+
+    const quality = screen.getByRole("group", { name: "Quality" });
+    expect(quality).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Low" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Medium" }));
+    fireEvent.click(screen.getByRole("button", { name: "2K" }));
+    fireEvent.change(prompt, { target: { value: "A cinematic storefront at dusk" } });
+    fireEvent.click(screen.getByRole("button", { name: "Generate image" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenNthCalledWith(3, "start_generation", {
+        request: {
+          requestId: expect.any(String),
+          modelId: "x-ai/grok-imagine-image-2.0",
+          prompt: "A cinematic storefront at dusk",
+          referenceTokens: [],
+          aspectRatio: null,
+          resolution: "2K",
+          quality: "medium",
         },
       });
     });
@@ -656,9 +838,69 @@ describe("App", () => {
           referenceTokens: ["reference-b", "reference-a"],
           aspectRatio: null,
           resolution: null,
+          quality: null,
         },
       });
     });
+  });
+
+  it("rejects Recraft references that violate its file or dimension limits", async () => {
+    invokeMock.mockImplementation(async (command) => {
+      if (command === "get_app_status") return appStatus;
+      if (command === "list_image_models") return imageModels;
+      if (command === "select_reference_image") {
+        return [
+          {
+            token: "too-large",
+            fileName: "too-large.png",
+            mimeType: "image/png",
+            width: 1024,
+            height: 1024,
+            sizeBytes: 5_000_001,
+            assetPath: "/managed/too-large.png",
+            thumbnailPath: "/managed/too-large-thumbnail.png",
+          },
+          {
+            token: "too-small",
+            fileName: "too-small.png",
+            mimeType: "image/png",
+            width: 255,
+            height: 1024,
+            sizeBytes: 1024,
+            assetPath: "/managed/too-small.png",
+            thumbnailPath: "/managed/too-small-thumbnail.png",
+          },
+        ];
+      }
+      if (command === "discard_reference") return undefined;
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    render(<App />);
+    await screen.findByPlaceholderText("Describe the image you want to make…");
+    fireEvent.click(screen.getByLabelText("Select image model"));
+    fireEvent.click(
+      screen.getByRole("option", { name: /Recraft V4\.1 Recraft/ }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /Add reference images/ }),
+    );
+
+    expect(
+      await screen.findByText(
+        "Recraft V4.1 reference images must be no larger than 5 MB, 256–4096 px per side and 16 MP maximum.",
+      ),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("discard_reference", {
+        token: "too-large",
+      });
+      expect(invokeMock).toHaveBeenCalledWith("discard_reference", {
+        token: "too-small",
+      });
+    });
+    expect(screen.queryByText("too-large.png")).not.toBeInTheDocument();
+    expect(screen.queryByText("too-small.png")).not.toBeInTheDocument();
   });
 
   it("does not generate while reference images are still importing", async () => {

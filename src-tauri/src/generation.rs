@@ -13,8 +13,9 @@ use crate::error::{AppError, ErrorKind};
 use crate::images::{create_history_thumbnail, create_reference_thumbnail, inspect_raster};
 use crate::models::{
     AppResult, CancelResult, GenerateRequest, GenerationJobEvent, GenerationJobStatus,
-    GenerationResult, GenerationSettings, JobAccepted, MAX_PROMPT_CHARS, MAX_REFERENCE_BYTES,
-    MAX_REFERENCE_TOTAL_BYTES, SelectedReference, validate_reference_total_bytes,
+    GenerationResult, GenerationSettings, ImageModel, JobAccepted, MAX_PROMPT_CHARS,
+    MAX_REFERENCE_BYTES, MAX_REFERENCE_TOTAL_BYTES, SelectedReference,
+    validate_reference_total_bytes,
 };
 use crate::state::{AppState, locked};
 
@@ -79,7 +80,7 @@ pub async fn start(
     let settings_json = serde_json::to_string(&settings).map_err(AppError::internal)?;
     // Credentials are required before an attempt becomes durable. Offline use
     // of the local Library must never create authentication-failure history.
-    let api_key = crate::credentials::get_api_key()?;
+    let api_key = crate::credentials::get_api_key(&app)?;
     let permit = acquire_generation_slot(state.generation_slots.clone())?;
 
     if request.reference_tokens.len() > model.max_references {
@@ -131,7 +132,7 @@ pub async fn start(
     }
 
     let (prepared_references, database_references) =
-        match prepare_references(selected_references, &cancellation, state).await {
+        match prepare_references(selected_references, &model, &cancellation, state).await {
             Ok(prepared) => prepared,
             Err(error) => {
                 remove_job(&request_id, state);
@@ -195,6 +196,7 @@ pub async fn start(
 
 async fn prepare_references(
     selected_references: Vec<SelectedReference>,
+    model: &ImageModel,
     cancellation: &CancellationToken,
     state: &AppState,
 ) -> AppResult<(Vec<PreparedReference>, Vec<DatabaseReference>)> {
@@ -223,6 +225,7 @@ async fn prepare_references(
         validate_reference_total_bytes(total_bytes, MAX_REFERENCE_TOTAL_BYTES)?;
 
         let (mime_type, extension, width, height) = inspect_raster(&bytes)?;
+        validate_model_reference(model, bytes.len() as u64, width, height)?;
         if mime_type != reference.mime_type
             || extension != reference.extension
             || width != reference.width
@@ -268,6 +271,67 @@ async fn prepare_references(
     }
 
     Ok((prepared_references, database_references))
+}
+
+fn validate_model_reference(
+    model: &ImageModel,
+    size_bytes: u64,
+    width: u32,
+    height: u32,
+) -> AppResult<()> {
+    let constraints = &model.reference_constraints;
+    if size_bytes > constraints.max_bytes {
+        return Err(AppError::new(
+            ErrorKind::File,
+            format!(
+                "{} reference images must be no larger than {} MB.",
+                model.name,
+                display_megabytes(constraints.max_bytes)
+            ),
+            false,
+        ));
+    }
+    if let Some(minimum) = constraints.min_dimension
+        && (width < minimum || height < minimum)
+    {
+        return Err(AppError::new(
+            ErrorKind::File,
+            format!(
+                "{} reference images must be at least {minimum} px per side.",
+                model.name
+            ),
+            false,
+        ));
+    }
+    if constraints
+        .max_dimension
+        .is_some_and(|maximum| width > maximum || height > maximum)
+        || constraints
+            .max_pixels
+            .is_some_and(|maximum| u64::from(width) * u64::from(height) > maximum)
+    {
+        let maximum_dimension = constraints
+            .max_dimension
+            .map(|value| format!("{value} px per side"));
+        let maximum_pixels = constraints
+            .max_pixels
+            .map(|value| format!("{} megapixels", value / 1_000_000));
+        let limits = [maximum_dimension, maximum_pixels]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" and ");
+        return Err(AppError::new(
+            ErrorKind::File,
+            format!("{} reference images must be at most {limits}.", model.name),
+            false,
+        ));
+    }
+    Ok(())
+}
+
+fn display_megabytes(bytes: u64) -> u64 {
+    ((bytes as f64 / (1024.0 * 1024.0)).round() as u64).max(1)
 }
 
 pub fn cancel(request_id: String, state: &AppState) -> AppResult<CancelResult> {
@@ -533,5 +597,42 @@ mod tests {
 
         drop(first);
         let _replacement = acquire_generation_slot(slots).expect("released slot");
+    }
+
+    #[test]
+    fn enforces_recraft_reference_constraints() {
+        let recraft = crate::models::fallback_image_models()
+            .into_iter()
+            .find(|model| model.id == crate::models::RECRAFT_V4_1_ID)
+            .expect("Recraft V4.1 model");
+
+        validate_model_reference(
+            &recraft,
+            recraft.reference_constraints.max_bytes,
+            4000,
+            4000,
+        )
+        .expect("reference at the limits");
+
+        let oversized = validate_model_reference(
+            &recraft,
+            recraft.reference_constraints.max_bytes + 1,
+            1024,
+            1024,
+        )
+        .expect_err("oversized reference");
+        assert_eq!(oversized.kind, ErrorKind::File);
+
+        let too_small =
+            validate_model_reference(&recraft, 1024, 255, 1024).expect_err("undersized dimensions");
+        assert_eq!(too_small.kind, ErrorKind::File);
+
+        let too_wide =
+            validate_model_reference(&recraft, 1024, 4097, 1024).expect_err("oversized dimensions");
+        assert_eq!(too_wide.kind, ErrorKind::File);
+
+        let too_many_pixels = validate_model_reference(&recraft, 1024, 4001, 4000)
+            .expect_err("oversized pixel count");
+        assert_eq!(too_many_pixels.kind, ErrorKind::File);
     }
 }

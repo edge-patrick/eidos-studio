@@ -374,6 +374,21 @@ svg {
   box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.18), inset 0 1px 2px rgba(0, 0, 0, 0.28);
 }
 
+.key-field-wrap.is-disabled {
+  border-color: rgba(255, 255, 255, 0.09);
+  background: rgba(11, 11, 12, 0.48);
+  box-shadow: none;
+}
+
+.key-field-wrap.is-disabled svg { color: #716a78; }
+
+.key-field-wrap.is-disabled input:disabled {
+  color: #a8a0ad;
+  cursor: not-allowed;
+  opacity: 1;
+  -webkit-text-fill-color: #a8a0ad;
+}
+
 .key-field-wrap svg { flex: 0 0 auto; color: var(--muted); }
 
 .key-field-wrap input {
@@ -420,6 +435,8 @@ svg {
 
 .offline-entry-button:disabled { opacity: 0.45; }
 .credential-actions { display: flex; min-height: 28px; justify-content: space-between; }
+
+.replacement-actions { justify-content: flex-start; }
 
 .credential-actions .text-button {
   display: inline-flex;

@@ -728,7 +728,17 @@ function formatDetailDate(value: string) {
 }
 
 function formatSettings(attempt: HistoryAttempt) {
-  return `${attempt.settings.aspectRatio ?? "Auto"} · ${attempt.settings.resolution ?? "Auto"}`;
+  return [
+    attempt.settings.aspectRatio ?? "Auto",
+    attempt.settings.resolution ?? "Auto",
+    attempt.settings.quality && capitalize(attempt.settings.quality),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function capitalize(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function formatDuration(durationMs: number) {

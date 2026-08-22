@@ -7,6 +7,7 @@ import type {
   GenerateRequest,
   HistoryAttempt,
   ImageModel,
+  ReferenceConstraints,
   ReferenceSelection,
 } from "../../shared/types";
 import {
@@ -17,11 +18,16 @@ import {
 interface ModelSettingsDraft {
   aspectRatio: string;
   resolution: string;
+  quality: string;
 }
 
 const defaultSettings: ModelSettingsDraft = {
   aspectRatio: "auto",
   resolution: "auto",
+  quality: "auto",
+};
+const DEFAULT_REFERENCE_CONSTRAINTS: ReferenceConstraints = {
+  maxBytes: 12 * 1024 * 1024,
 };
 
 export function useStudioController(status: AppStatus, models: ImageModel[]) {
@@ -40,9 +46,13 @@ export function useStudioController(status: AppStatus, models: ImageModel[]) {
       isDefault: true,
       supportedAspectRatios: status.supportedAspectRatios,
       supportedResolutions: status.supportedResolutions,
+      supportedQualities: [],
       maxReferences: status.maxReferences,
+      referenceConstraints: DEFAULT_REFERENCE_CONSTRAINTS,
     };
   const maxReferences = selectedModel.maxReferences;
+  const referenceConstraints = selectedModel.referenceConstraints;
+  const maxReferenceBytes = referenceConstraints.maxBytes;
   const maxReferenceTotalBytes = status.maxReferenceTotalBytes;
   const [prompt, setPrompt] = useState("");
   const [references, setReferences] = useState<ReferenceSelection[]>([]);
@@ -54,7 +64,11 @@ export function useStudioController(status: AppStatus, models: ImageModel[]) {
   const [settingsByModel, setSettingsByModel] = useState<
     Record<string, ModelSettingsDraft>
   >({});
-  const selectedSettings = settingsByModel[selectedModel.id] ?? defaultSettings;
+  const selectedDefaults = defaultSettingsForModel(selectedModel);
+  const selectedSettings = {
+    ...selectedDefaults,
+    ...settingsByModel[selectedModel.id],
+  };
   const aspectRatio =
     selectedSettings.aspectRatio === "auto" ||
     selectedModel.supportedAspectRatios.includes(selectedSettings.aspectRatio)
@@ -65,6 +79,9 @@ export function useStudioController(status: AppStatus, models: ImageModel[]) {
     selectedModel.supportedResolutions.includes(selectedSettings.resolution)
       ? selectedSettings.resolution
       : "auto";
+  const quality = selectedModel.supportedQualities.includes(selectedSettings.quality)
+    ? selectedSettings.quality
+    : selectedDefaults.quality;
   const [inputError, setInputError] = useState<AppError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [generation, dispatch] = useReducer(
@@ -137,14 +154,24 @@ export function useStudioController(status: AppStatus, models: ImageModel[]) {
     try {
       const selections = await eidosApi.selectReferences(selectedBytes);
       if (selections.length === 0) return;
+      const validSelections = selections.filter(
+        (selection) => referenceMeetsConstraints(selection, referenceConstraints),
+      );
+      const invalidSelections = selections.filter(
+        (selection) => !referenceMeetsConstraints(selection, referenceConstraints),
+      );
       const available = maxReferences - references.length;
-      const accepted = selections.slice(0, available);
-      const overflow = selections.slice(available);
+      const accepted = validSelections.slice(0, available);
+      const overflow = [...invalidSelections, ...validSelections.slice(available)];
       setReferences((current) => [...current, ...accepted]);
       await Promise.all(
         overflow.map((selection) => eidosApi.discardReference(selection.token)),
       );
-      if (overflow.length > 0) {
+      if (invalidSelections.length > 0) {
+        setNotice(
+          `${selectedModel.name} reference images must be ${formatReferenceRequirements(referenceConstraints)}.`,
+        );
+      } else if (overflow.length > 0) {
         setNotice(`${selectedModel.name} accepts up to ${maxReferences} reference images.`);
       }
     } catch (error) {
@@ -212,7 +239,7 @@ export function useStudioController(status: AppStatus, models: ImageModel[]) {
     setSettingsByModel((current) => ({
       ...current,
       [modelId]: {
-        ...defaultSettings,
+        ...defaultSettingsForModel(selectedModel),
         ...current[modelId],
         [key]: value,
       },
@@ -220,6 +247,9 @@ export function useStudioController(status: AppStatus, models: ImageModel[]) {
   }
 
   const referenceLimitExceeded = references.length > maxReferences;
+  const referenceConstraintExceeded = references.some(
+    (reference) => !referenceMeetsConstraints(reference, referenceConstraints),
+  );
 
   async function generate() {
     if (
@@ -229,6 +259,7 @@ export function useStudioController(status: AppStatus, models: ImageModel[]) {
       !prompt.trim() ||
       referenceBusy ||
       referenceLimitExceeded ||
+      referenceConstraintExceeded ||
       generation.status === "generating"
     ) {
       return;
@@ -241,6 +272,7 @@ export function useStudioController(status: AppStatus, models: ImageModel[]) {
       referenceTokens: references.map(({ token }) => token),
       aspectRatio: aspectRatio === "auto" ? null : aspectRatio,
       resolution: resolution === "auto" ? null : resolution,
+      quality: quality === "auto" ? null : quality,
     };
 
     activeRequestId.current = requestId;
@@ -349,6 +381,11 @@ export function useStudioController(status: AppStatus, models: ImageModel[]) {
         targetModel.supportedResolutions.includes(attempt.settings.resolution)
         ? attempt.settings.resolution
         : "auto";
+    const nextQuality =
+      attempt.settings.quality &&
+        targetModel.supportedQualities.includes(attempt.settings.quality)
+        ? attempt.settings.quality
+        : defaultSettingsForModel(targetModel).quality;
 
     setPrompt(attempt.prompt);
     setSelectedModelId(targetModel.id);
@@ -357,6 +394,7 @@ export function useStudioController(status: AppStatus, models: ImageModel[]) {
       [targetModel.id]: {
         aspectRatio: nextAspectRatio,
         resolution: nextResolution,
+        quality: nextQuality,
       },
     }));
     setReferences(nextReferences);
@@ -392,6 +430,9 @@ export function useStudioController(status: AppStatus, models: ImageModel[]) {
     selectedModelId: selectedModel.id,
     selectModel,
     maxReferences,
+    maxReferenceBytes,
+    referenceRequirements: formatReferenceRequirements(referenceConstraints),
+    referenceDimensionSummary: formatReferenceDimensions(referenceConstraints),
     maxReferenceTotalBytes,
     referenceTotalBytes,
     referenceBusy,
@@ -399,7 +440,10 @@ export function useStudioController(status: AppStatus, models: ImageModel[]) {
     setAspectRatio: (value: string) => setModelSetting("aspectRatio", value),
     resolution,
     setResolution: (value: string) => setModelSetting("resolution", value),
+    quality,
+    setQuality: (value: string) => setModelSetting("quality", value),
     referenceLimitExceeded,
+    referenceConstraintExceeded,
     generation,
     generationError,
     notice,
@@ -416,7 +460,70 @@ export function useStudioController(status: AppStatus, models: ImageModel[]) {
     loadHistoryAttempt,
     aspectRatioOptions: ["auto", ...selectedModel.supportedAspectRatios],
     resolutionOptions: ["auto", ...selectedModel.supportedResolutions],
+    qualityOptions: selectedModel.supportedQualities,
   };
+}
+
+function defaultSettingsForModel(model: ImageModel): ModelSettingsDraft {
+  return {
+    ...defaultSettings,
+    quality: model.supportedQualities.includes("auto")
+      ? "auto"
+      : model.supportedQualities[0] ?? "auto",
+  };
+}
+
+function referenceMeetsConstraints(
+  reference: ReferenceSelection,
+  constraints: ReferenceConstraints,
+) {
+  if (reference.sizeBytes > constraints.maxBytes) return false;
+  if (
+    constraints.minDimension !== undefined &&
+    (reference.width < constraints.minDimension ||
+      reference.height < constraints.minDimension)
+  ) {
+    return false;
+  }
+  if (
+    constraints.maxDimension !== undefined &&
+    (reference.width > constraints.maxDimension ||
+      reference.height > constraints.maxDimension)
+  ) {
+    return false;
+  }
+  return !(
+    constraints.maxPixels !== undefined &&
+    reference.width * reference.height > constraints.maxPixels
+  );
+}
+
+function formatReferenceRequirements(constraints: ReferenceConstraints) {
+  return [
+    `no larger than ${formatMegabytes(constraints.maxBytes)} MB`,
+    formatReferenceDimensions(constraints),
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
+function formatReferenceDimensions(constraints: ReferenceConstraints) {
+  const dimensions =
+    constraints.minDimension !== undefined && constraints.maxDimension !== undefined
+      ? `${constraints.minDimension}–${constraints.maxDimension} px per side`
+      : constraints.minDimension !== undefined
+        ? `at least ${constraints.minDimension} px per side`
+        : constraints.maxDimension !== undefined
+          ? `at most ${constraints.maxDimension} px per side`
+          : "";
+  const pixels = constraints.maxPixels
+    ? `${constraints.maxPixels / 1_000_000} MP maximum`
+    : "";
+  return [dimensions, pixels].filter(Boolean).join(" and ");
+}
+
+function formatMegabytes(bytes: number) {
+  return Math.max(1, Math.round(bytes / 1024 / 1024));
 }
 
 export type StudioController = ReturnType<typeof useStudioController>;

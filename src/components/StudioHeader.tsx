@@ -55,7 +55,7 @@ export function StudioHeader({
         <span className="openrouter-status-dot" aria-hidden="true" />
         <span className="key-status-copy">
           <strong>OpenRouter {connected ? "connected" : "not connected"}</strong>
-          <small>{connected ? "Click to change key" : "Click to connect"}</small>
+          <small>{connected ? "Click to manage key" : "Click to connect"}</small>
         </span>
       </button>
     </header>

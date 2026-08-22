@@ -1,5 +1,6 @@
 export interface AppStatus {
   hasApiKey: boolean;
+  apiKeyPreview: string | null;
   modelId: string;
   modelName: string;
   supportedAspectRatios: string[];
@@ -18,7 +19,16 @@ export interface ImageModel {
   unavailableReason?: string;
   supportedAspectRatios: string[];
   supportedResolutions: string[];
+  supportedQualities: string[];
   maxReferences: number;
+  referenceConstraints: ReferenceConstraints;
+}
+
+export interface ReferenceConstraints {
+  maxBytes: number;
+  minDimension?: number;
+  maxDimension?: number;
+  maxPixels?: number;
 }
 
 export interface AppError {
@@ -46,6 +56,7 @@ export interface GenerateRequest {
   referenceTokens: string[];
   aspectRatio: string | null;
   resolution: string | null;
+  quality: string | null;
 }
 
 export interface GenerationResult {
@@ -80,6 +91,7 @@ export interface SaveResult {
 export interface GenerationSettings {
   aspectRatio?: string;
   resolution?: string;
+  quality?: string;
 }
 
 export interface HistoryAsset {

@@ -17,13 +17,18 @@ const estimatedSquare1KPrices: Record<string, string> = {
   "google/gemini-3.1-flash-image": "$0.07",
   "google/gemini-3-pro-image": "$0.13",
   "openai/gpt-image-2": "$0.03",
+  "openai/gpt-image-1-mini": "$0.011",
   "black-forest-labs/flux.2-klein-4b": "$0.014",
   "black-forest-labs/flux.2-pro": "$0.03",
   "black-forest-labs/flux.2-flex": "$0.06",
   "black-forest-labs/flux.2-max": "$0.07",
   "bytedance-seed/seedream-5-0-pro": "$0.045",
   "qwen/qwen-image-3-pro": "$0.04",
+  "qwen/qwen-image-3": "$0.03",
   "krea/krea-2-medium-turbo": "$0.015",
+  "krea/krea-2-medium": "$0.03",
+  "recraft/recraft-v4.1": "$0.035",
+  "x-ai/grok-imagine-image-2.0": "$0.04",
 };
 
 export function ModelManagerModal({

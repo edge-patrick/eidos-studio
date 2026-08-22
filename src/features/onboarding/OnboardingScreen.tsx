@@ -12,6 +12,7 @@ import type { AppError } from "../../shared/types";
 
 interface OnboardingScreenProps {
   apiKey: string;
+  apiKeyPreview: string | null;
   setApiKey: (value: string) => void;
   connecting: boolean;
   changingKey: boolean;
@@ -19,12 +20,15 @@ interface OnboardingScreenProps {
   error: AppError | null;
   onSubmit: (event: React.FormEvent) => void;
   onBack: () => void;
+  onChangeKey: () => void;
+  onCancelChange: () => void;
   onForget: () => void;
   onOpenLibrary: () => void;
 }
 
 export function OnboardingScreen({
   apiKey,
+  apiKeyPreview,
   setApiKey,
   connecting,
   changingKey,
@@ -32,9 +36,13 @@ export function OnboardingScreen({
   error,
   onSubmit,
   onBack,
+  onChangeKey,
+  onCancelChange,
   onForget,
   onOpenLibrary,
 }: OnboardingScreenProps) {
+  const showingStoredKey = hasApiKey && !changingKey;
+
   return (
     <main className="onboarding-shell">
       <header className="onboarding-titlebar" data-tauri-drag-region>
@@ -44,9 +52,11 @@ export function OnboardingScreen({
         <div className="manifesto-copy">
           <p className="eyebrow">OpenRouter image generation, refined.</p>
           <h1 id="welcome-title">
-            A beautiful front end
+            Create images.
             <br />
-            for powerful models.
+            With every model.
+            <br />
+            In one place.
           </h1>
           <p>
             Eidos is a free desktop workspace for OpenRouter image generation.
@@ -57,57 +67,42 @@ export function OnboardingScreen({
       </section>
 
       <section className="credential-panel">
-        <form className="credential-form" onSubmit={onSubmit}>
-          <div>
-            <h2>{changingKey ? "Replace your key" : "Bring your own key"}</h2>
-            <p className="form-intro">
-              Eidos uses your OpenRouter balance directly. There is no Eidos
-              account and no separate subscription.
-            </p>
-          </div>
+        {showingStoredKey ? (
+          <div className="credential-form stored-key-state">
+            <div>
+              <h2>OpenRouter connected</h2>
+              <p className="form-intro">
+                Your saved key is ready to use with your OpenRouter balance.
+              </p>
+            </div>
 
-          <label className="field-label" htmlFor="api-key">
-            OpenRouter API key
-          </label>
-          <div className="key-field-wrap">
-            <KeyIcon />
-            <input
-              id="api-key"
-              type="password"
-              value={apiKey}
-              onChange={(event) => setApiKey(event.currentTarget.value)}
-              placeholder="sk-or-v1-…"
-              autoComplete="off"
-              spellCheck={false}
-              autoFocus
-            />
-          </div>
+            <label className="field-label" htmlFor="stored-api-key">
+              Stored OpenRouter API key
+            </label>
+            <div className="key-field-wrap is-disabled">
+              <KeyIcon />
+              <input
+                id="stored-api-key"
+                type="text"
+                value={apiKeyPreview ?? "sk-or-v1-••••••••••••••••"}
+                disabled
+                readOnly
+              />
+            </div>
 
-          {error && <ErrorMessage error={error} compact />}
+            {error && <ErrorMessage error={error} compact />}
 
-          <button
-            className="primary-button connect-button"
-            type="submit"
-            disabled={connecting || apiKey.trim().length < 20}
-          >
-            <span>{connecting ? "Checking key" : "Connect OpenRouter"}</span>
-            {connecting ? <Spinner /> : <ArrowIcon />}
-          </button>
-
-          {!hasApiKey && (
             <button
-              className="offline-entry-button"
+              className="primary-button connect-button"
               type="button"
-              onClick={onOpenLibrary}
+              onClick={onChangeKey}
               disabled={connecting}
             >
-              <span aria-hidden="true" />
-              Open local library
+              <span>Change key</span>
+              <ArrowIcon />
             </button>
-          )}
 
-          <div className="credential-actions">
-            {changingKey && hasApiKey && (
+            <div className="credential-actions">
               <button
                 className="text-button"
                 type="button"
@@ -117,8 +112,6 @@ export function OnboardingScreen({
                 <BackIcon />
                 Back to studio
               </button>
-            )}
-            {hasApiKey && (
               <button
                 className="text-button danger-text"
                 type="button"
@@ -128,15 +121,83 @@ export function OnboardingScreen({
                 <TrashIcon />
                 Forget stored key
               </button>
-            )}
-          </div>
+            </div>
 
-          <p className="privacy-note">
-            <LockIcon />
-            Stored in macOS Keychain. When you generate, prompts and references
-            are sent to OpenRouter and the model provider.
-          </p>
-        </form>
+            <p className="privacy-note">
+              <LockIcon />
+              Stored in macOS Keychain. When you generate, prompts and references
+              are sent to OpenRouter and the model provider.
+            </p>
+          </div>
+        ) : (
+          <form className="credential-form" onSubmit={onSubmit}>
+            <div>
+              <h2>{changingKey ? "Connect a new key" : "Bring your own key"}</h2>
+              <p className="form-intro">
+                Eidos uses your OpenRouter balance directly. There is no Eidos
+                account and no separate subscription.
+              </p>
+            </div>
+
+            <label className="field-label" htmlFor="api-key">
+              OpenRouter API key
+            </label>
+            <div className="key-field-wrap">
+              <KeyIcon />
+              <input
+                id="api-key"
+                type="password"
+                value={apiKey}
+                onChange={(event) => setApiKey(event.currentTarget.value)}
+                placeholder="sk-or-v1-…"
+                autoComplete="off"
+                spellCheck={false}
+                autoFocus
+              />
+            </div>
+
+            {error && <ErrorMessage error={error} compact />}
+
+            <button
+              className="primary-button connect-button"
+              type="submit"
+              disabled={connecting || apiKey.trim().length < 20}
+            >
+              <span>{connecting ? "Checking key" : "Connect OpenRouter"}</span>
+              {connecting ? <Spinner /> : <ArrowIcon />}
+            </button>
+
+            {changingKey ? (
+              <div className="credential-actions replacement-actions">
+                <button
+                  className="text-button"
+                  type="button"
+                  onClick={onCancelChange}
+                  disabled={connecting}
+                >
+                  <BackIcon />
+                  Keep current key
+                </button>
+              </div>
+            ) : (
+              <button
+                className="offline-entry-button"
+                type="button"
+                onClick={onOpenLibrary}
+                disabled={connecting}
+              >
+                <span aria-hidden="true" />
+                Open local library
+              </button>
+            )}
+
+            <p className="privacy-note">
+              <LockIcon />
+              Stored in macOS Keychain. When you generate, prompts and references
+              are sent to OpenRouter and the model provider.
+            </p>
+          </form>
+        )}
       </section>
     </main>
   );

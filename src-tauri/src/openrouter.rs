@@ -55,6 +55,7 @@ struct RemoteImageModel {
 struct RemoteSupportedParameters {
     aspect_ratio: Option<EnumCapability>,
     resolution: Option<EnumCapability>,
+    quality: Option<EnumCapability>,
     input_references: Option<RangeCapability>,
 }
 
@@ -167,6 +168,7 @@ impl OpenRouterClient {
                         Some("Unavailable on OpenRouter. Try again later.".to_owned());
                     model.supported_aspect_ratios.clear();
                     model.supported_resolutions.clear();
+                    model.supported_qualities.clear();
                     model.max_references = 0;
                     return Ok(model);
                 };
@@ -187,6 +189,8 @@ impl OpenRouterClient {
                 );
                 model.supported_resolutions =
                     intersect_values(model.supported_resolutions, supported.resolution.as_ref());
+                model.supported_qualities =
+                    intersect_values(model.supported_qualities, supported.quality.as_ref());
                 if let Some(references) = supported.input_references.as_ref() {
                     model.max_references = model.max_references.min(references.max);
                 } else {
@@ -390,6 +394,9 @@ fn generation_payload(model_id: &str, prompt: &str, settings: &GenerationSetting
     }
     if let Some(resolution) = settings.resolution.as_deref() {
         payload["resolution"] = json!(resolution);
+    }
+    if let Some(quality) = settings.quality.as_deref() {
+        payload["quality"] = json!(quality);
     }
     if model_id == IMAGE_MODEL_PRO_ID && settings.resolution.as_deref() == Some("4K") {
         payload["provider"] = json!({
@@ -688,11 +695,13 @@ mod tests {
             &GenerationSettings {
                 aspect_ratio: Some("16:9".to_owned()),
                 resolution: Some("2K".to_owned()),
+                quality: Some("medium".to_owned()),
             },
         );
 
         assert_eq!(payload["aspect_ratio"], "16:9");
         assert_eq!(payload["resolution"], "2K");
+        assert_eq!(payload["quality"], "medium");
     }
 
     #[test]
@@ -703,11 +712,13 @@ mod tests {
             &GenerationSettings {
                 aspect_ratio: None,
                 resolution: None,
+                quality: None,
             },
         );
 
         assert!(payload.get("aspect_ratio").is_none());
         assert!(payload.get("resolution").is_none());
+        assert!(payload.get("quality").is_none());
     }
 
     #[test]
@@ -718,6 +729,7 @@ mod tests {
             &GenerationSettings {
                 aspect_ratio: Some("16:9".to_owned()),
                 resolution: Some("4K".to_owned()),
+                quality: None,
             },
         );
 
@@ -882,14 +894,20 @@ mod tests {
             {"id":"google/gemini-3.1-flash-lite-image","supported_parameters":{"resolution":{"type":"enum","values":["1K"]},"aspect_ratio":{"type":"enum","values":["1:1","16:9"]},"input_references":{"type":"range","min":0,"max":10}}},
             {"id":"google/gemini-3.1-flash-image","supported_parameters":{"resolution":{"type":"enum","values":["1K","2K","4K"]},"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"input_references":{"type":"range","min":0,"max":14}}},
             {"id":"google/gemini-3-pro-image","supported_parameters":{"resolution":{"type":"enum","values":["1K","2K","4K"]},"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"input_references":{"type":"range","min":0,"max":14}}},
-            {"id":"openai/gpt-image-2","supported_parameters":{"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"input_references":{"type":"range","min":0,"max":16}}},
+            {"id":"openai/gpt-image-2","supported_parameters":{"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"quality":{"type":"enum","values":["auto","low","medium","high"]},"input_references":{"type":"range","min":0,"max":16}}},
+            {"id":"openai/gpt-image-1-mini","supported_parameters":{"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2"]},"quality":{"type":"enum","values":["auto","low","medium","high"]},"input_references":{"type":"range","min":0,"max":16}}},
             {"id":"black-forest-labs/flux.2-klein-4b","supported_parameters":{"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"output_format":{"type":"enum","values":["png","jpeg"]},"input_references":{"type":"range","min":0,"max":4},"seed":{"type":"boolean"}}},
             {"id":"black-forest-labs/flux.2-pro","supported_parameters":{"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"output_format":{"type":"enum","values":["png","jpeg"]},"input_references":{"type":"range","min":0,"max":8},"seed":{"type":"boolean"}}},
             {"id":"black-forest-labs/flux.2-flex","supported_parameters":{"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"output_format":{"type":"enum","values":["png","jpeg"]},"input_references":{"type":"range","min":0,"max":8},"seed":{"type":"boolean"}}},
             {"id":"black-forest-labs/flux.2-max","supported_parameters":{"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"output_format":{"type":"enum","values":["png","jpeg"]},"input_references":{"type":"range","min":0,"max":8},"seed":{"type":"boolean"}}},
             {"id":"bytedance-seed/seedream-5-0-pro","supported_parameters":{"resolution":{"type":"enum","values":["1K"]},"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"input_references":{"type":"range","min":0,"max":12},"seed":{"type":"boolean"}}},
+            {"id":"bytedance-seed/seedream-5-0-lite","supported_parameters":{"resolution":{"type":"enum","values":["2K","4K"]},"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"input_references":{"type":"range","min":0,"max":14},"seed":{"type":"boolean"}}},
             {"id":"qwen/qwen-image-3-pro","supported_parameters":{"resolution":{"type":"enum","values":["1K","2K","4K"]},"aspect_ratio":{"type":"enum","values":["1:1","16:9"]},"input_references":{"type":"range","min":0,"max":6},"seed":{"type":"boolean"}}},
-            {"id":"krea/krea-2-medium-turbo","supported_parameters":{"resolution":{"type":"enum","values":["1K"]},"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"input_references":{"type":"range","min":0,"max":2},"seed":{"type":"boolean"}}}
+            {"id":"qwen/qwen-image-3","supported_parameters":{"resolution":{"type":"enum","values":["1K","2K"]},"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"input_references":{"type":"range","min":0,"max":4},"seed":{"type":"boolean"}}},
+            {"id":"krea/krea-2-medium-turbo","supported_parameters":{"resolution":{"type":"enum","values":["1K"]},"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"input_references":{"type":"range","min":0,"max":2},"seed":{"type":"boolean"}}},
+            {"id":"krea/krea-2-medium","supported_parameters":{"resolution":{"type":"enum","values":["1K"]},"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"input_references":{"type":"range","min":0,"max":1},"seed":{"type":"boolean"}}},
+            {"id":"recraft/recraft-v4.1","supported_parameters":{"aspect_ratio":{"type":"enum","values":["1:1","4:3","3:4","16:9","9:16"]},"input_references":{"type":"range","min":0,"max":1}}},
+            {"id":"x-ai/grok-imagine-image-2.0","supported_parameters":{"resolution":{"type":"enum","values":["1K","2K"]},"aspect_ratio":{"type":"enum","values":["1:1","2:3","3:2","16:9"]},"quality":{"type":"enum","values":["low","medium"]},"input_references":{"type":"range","min":0,"max":3}}}
         ]}"#;
         let (base_url, request) = mock_server("200 OK", body);
         let client = OpenRouterClient::new(Client::new(), base_url);
@@ -899,16 +917,20 @@ mod tests {
             .await
             .expect("catalog");
 
-        assert_eq!(models.len(), 11);
+        assert_eq!(models.len(), 17);
         assert!(models.iter().all(|model| model.available));
         assert_eq!(models[0].supported_aspect_ratios, ["1:1", "16:9"]);
         assert_eq!(models[0].max_references, 10);
         assert!(models[3].supported_resolutions.is_empty());
+        assert_eq!(
+            models[3].supported_qualities,
+            ["auto", "low", "medium", "high"]
+        );
         assert_eq!(models[3].max_references, crate::models::MAX_REFERENCES);
-        assert_eq!(models[4].max_references, 4);
-        assert!(models[5..8].iter().all(|model| model.max_references == 8));
+        assert_eq!(models[5].max_references, 4);
+        assert!(models[6..9].iter().all(|model| model.max_references == 8));
         assert!(
-            models[4..8]
+            models[5..9]
                 .iter()
                 .all(|model| model.supported_resolutions.is_empty())
         );
@@ -934,6 +956,13 @@ mod tests {
             .expect("Krea 2 Medium Turbo");
         assert_eq!(krea.supported_resolutions, ["1K"]);
         assert_eq!(krea.max_references, 1);
+
+        let grok = models
+            .iter()
+            .find(|model| model.id == crate::models::GROK_IMAGINE_IMAGE_2_ID)
+            .expect("Grok Imagine Image 2.0");
+        assert_eq!(grok.supported_qualities, ["low", "medium"]);
+        assert_eq!(grok.max_references, 3);
         let request = request.join().expect("mock request");
         assert!(request.starts_with("GET /images/models HTTP/1.1"));
     }
@@ -951,7 +980,7 @@ mod tests {
             .await
             .expect("catalog");
 
-        assert_eq!(models.len(), 11);
+        assert_eq!(models.len(), 17);
         assert!(!models[0].available);
         assert_eq!(
             models[0].unavailable_reason.as_deref(),
@@ -990,6 +1019,7 @@ mod tests {
         assert!(models[3].available);
         assert!(models[3].supported_aspect_ratios.is_empty());
         assert!(models[3].supported_resolutions.is_empty());
+        assert!(models[3].supported_qualities.is_empty());
         assert_eq!(models[3].max_references, 0);
         request.join().expect("mock request");
     }
@@ -1049,6 +1079,7 @@ mod tests {
                 &GenerationSettings {
                     aspect_ratio: Some("1:1".to_owned()),
                     resolution: Some("1K".to_owned()),
+                    quality: None,
                 },
                 &[],
                 &CancellationToken::new(),

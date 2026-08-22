@@ -327,6 +327,14 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
           </p>
         )}
 
+        {studio.referenceConstraintExceeded && (
+          <p className="reference-limit-warning" role="alert">
+            {studio.selectedModel.name} requires reference images that are{" "}
+            {studio.referenceRequirements}. Remove the incompatible image or choose
+            another model.
+          </p>
+        )}
+
         {studio.references.length < studio.maxReferences &&
           studio.referenceTotalBytes < studio.maxReferenceTotalBytes && (
           <button
@@ -347,8 +355,11 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
                     : "Add reference images"}
               </strong>
               <span>
-                PNG, JPEG or WebP · 12 MB each ·{" "}
+                PNG, JPEG or WebP · {Math.max(1, Math.round(studio.maxReferenceBytes / 1024 / 1024))} MB each ·{" "}
                 {Math.round(studio.maxReferenceTotalBytes / 1024 / 1024)} MB total
+                {studio.referenceDimensionSummary && (
+                  <> · {studio.referenceDimensionSummary}</>
+                )}
               </span>
             </div>
           </button>
@@ -358,7 +369,7 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
       <div className="composer-section settings-section">
         <div className="section-heading">
           <span>04</span>
-          <span>Size</span>
+          <span>Output</span>
         </div>
 
         <div className="settings-grid">
@@ -386,6 +397,17 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
               {studio.selectedModel.name} uses the provider&apos;s default output size.
             </p>
           )}
+          {studio.qualityOptions.length > 0 && (
+            <OptionStrip
+              id="quality"
+              className="quality-options"
+              label="Quality"
+              options={studio.qualityOptions}
+              value={studio.quality}
+              onChange={studio.setQuality}
+              disabled={studio.busy}
+            />
+          )}
         </div>
       </div>
 
@@ -396,6 +418,9 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
             1 image · {formatOption(studio.aspectRatio)}
             {studio.selectedModel.supportedResolutions.length > 0 && (
               <> · {formatOption(studio.resolution)}</>
+            )}
+            {studio.qualityOptions.length > 0 && (
+              <> · {formatOption(studio.quality)}</>
             )}
           </strong>
         </div>
@@ -409,6 +434,7 @@ export function ComposerPanel({ status, studio }: ComposerPanelProps) {
             !studio.prompt.trim() ||
             studio.referenceBusy ||
             studio.referenceLimitExceeded ||
+            studio.referenceConstraintExceeded ||
             studio.busy
           }
           title={
@@ -540,5 +566,5 @@ function OptionStrip({
 }
 
 function formatOption(option: string) {
-  return option === "auto" ? "Auto" : option;
+  return option.charAt(0).toUpperCase() + option.slice(1);
 }
